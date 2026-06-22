@@ -41,11 +41,7 @@ export default function RoleGuard({ allowedRoles, children }: RoleGuardProps) {
     }
   }, [fallbackChecked, hasAccess, loading, router]);
 
-  if (loading || !fallbackChecked) {
-    return <div style={{ padding: '2rem' }}>Checking session...</div>;
-  }
-
-  if (!hasAccess) {
+  if (!loading && fallbackChecked && !hasAccess) {
     return null;
   }
 

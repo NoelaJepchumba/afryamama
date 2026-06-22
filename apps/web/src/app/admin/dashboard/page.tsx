@@ -3,8 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
-import { firebaseDb } from '@/lib/firebaseClient';
+import { collection, getDocs, firebaseDb, type QueryDocumentSnapshot, type DocumentData } from '@/lib/firebaseClient';
 
 interface DashboardUserRow {
   id: string;
@@ -61,7 +60,7 @@ export default function AdminDashboard() {
           getDocs(collection(firebaseDb, 'admins')),
         ]);
 
-        const usersRows = usersSnapshot.docs.map((docItem) => {
+        const usersRows = usersSnapshot.docs.map((docItem: QueryDocumentSnapshot<DocumentData>) => {
           const data = docItem.data();
           const role = (data.role || data.Role || 'USER').toString().toUpperCase();
           return {

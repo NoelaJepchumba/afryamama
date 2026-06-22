@@ -1,21 +1,81 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { collection, getDocs, firebaseDb } from '@/lib/firebaseClient';
+
+interface MotherRow {
+  id: string;
+  name: string;
+  phone: string;
+  location: string;
+  bloodGroup: string;
+  status: string;
+  edd: string;
+}
+
+function toLabel(value: unknown, fallback = '-'): string {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || fallback;
+  }
+  if (typeof value === 'number') {
+    return String(value);
+  }
+  return fallback;
+}
 
 export default function MothersPage() {
   const [search, setSearch] = useState('');
-  
-  const mothers = [
-    { id: 'm-1', name: 'Amina Omondi', phone: '+254712345678', location: 'Nairobi', bloodGroup: 'O+', status: 'ACTIVE PREGNANCY', edd: '2026-10-22' },
-    { id: 'm-2', name: 'Sarah Kamau', phone: '+254722889900', location: 'Kiambu', bloodGroup: 'A-', status: 'POSTNATAL', edd: 'Completed' },
-    { id: 'm-3', name: 'Fatima Yusuf', phone: '+254733112233', location: 'Mombasa', bloodGroup: 'B+', status: 'ACTIVE PREGNANCY', edd: '2026-12-05' },
-    { id: 'm-4', name: 'Grace Mutua', phone: '+254744556677', location: 'Machakos', bloodGroup: 'O-', status: 'ACTIVE PREGNANCY', edd: '2026-08-14' },
-  ];
+  const [loading, setLoading] = useState(true);
+  const [mothers, setMothers] = useState<MotherRow[]>([]);
 
-  const filteredMothers = mothers.filter(m => 
-    m.name.toLowerCase().includes(search.toLowerCase()) || 
-    m.location.toLowerCase().includes(search.toLowerCase())
-  );
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadMothers() {
+      try {
+        const mothersSnapshot = await getDocs(collection(firebaseDb, 'mothers'));
+        const rows: MotherRow[] = mothersSnapshot.docs.map((docItem) => {
+          const data = docItem.data() as Record<string, unknown>;
+          const firstName = toLabel(data.firstName ?? data.first_name, '');
+          const lastName = toLabel(data.lastName ?? data.last_name, '');
+          const fullName = `${firstName} ${lastName}`.trim();
+
+          return {
+            id: docItem.id,
+            name: fullName || toLabel(data.full_name ?? data.name, 'Unknown Mother'),
+            phone: toLabel(data.phone),
+            location: toLabel(data.location ?? data.county),
+            bloodGroup: toLabel(data.bloodGroup ?? data.blood_group),
+            status: toLabel(data.status ?? data.maternalStatus ?? data.stage, 'UNKNOWN'),
+            edd: toLabel(data.edd ?? data.expectedDeliveryDate ?? data.expected_delivery_date),
+          };
+        });
+
+        if (isMounted) {
+          setMothers(rows);
+        }
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+
+    loadMothers();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const filteredMothers = useMemo(() => {
+    const term = search.toLowerCase();
+    return mothers.filter((m) =>
+      m.name.toLowerCase().includes(term) ||
+      m.location.toLowerCase().includes(term) ||
+      m.phone.toLowerCase().includes(term)
+    );
+  }, [mothers, search]);
 
   return (
     <main className="main-content">
@@ -23,9 +83,6 @@ export default function MothersPage() {
           <div>
             <h1 className="page-title">Mothers Registry</h1>
             <p className="page-subtitle">Manage patient directories, status updates, and emergency details.</p>
-          </div>
-          <div>
-            <button className="btn btn-primary">+ Register New Mother</button>
           </div>
         </div>
 
@@ -62,23 +119,35 @@ export default function MothersPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredMothers.map((mother) => (
-                  <tr key={mother.id}>
-                    <td style={{ fontWeight: '600' }}>{mother.name}</td>
-                    <td>{mother.phone}</td>
-                    <td>{mother.location}</td>
-                    <td>{mother.bloodGroup}</td>
-                    <td>
-                      <span className={`badge ${mother.status === 'ACTIVE PREGNANCY' ? 'badge-success' : 'badge-warning'}`}>
-                        {mother.status}
-                      </span>
-                    </td>
-                    <td>{mother.edd}</td>
-                    <td>
-                      <button className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>View Details</button>
-                    </td>
+                {loading ? (
+                  <tr>
+                    <td colSpan={7}>Loading mothers from Firestore...</td>
                   </tr>
-                ))}
+                ) : filteredMothers.length === 0 ? (
+                  <tr>
+                    <td colSpan={7}>No registered mothers found.</td>
+                  </tr>
+                ) : (
+                  filteredMothers.map((mother) => (
+                    <tr key={mother.id}>
+                      <td style={{ fontWeight: '600' }}>{mother.name}</td>
+                      <td>{mother.phone}</td>
+                      <td>{mother.location}</td>
+                      <td>{mother.bloodGroup}</td>
+                      <td>
+                        <span className={`badge ${mother.status.toUpperCase().includes('PREG') ? 'badge-success' : 'badge-warning'}`}>
+                          {mother.status}
+                        </span>
+                      </td>
+                      <td>{mother.edd}</td>
+                      <td>
+                        <Link href={`/mothers/${mother.id}`} className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>
+                          View Details
+                        </Link>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

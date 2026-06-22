@@ -1,6 +1,25 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+export {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+  GoogleAuthProvider,
+} from 'firebase/auth';
+export type { User } from 'firebase/auth';
+export {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  query,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
+export type { QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || 'AIzaSyDdkxqgxqInhIG-L0v7H_LJeqjAEap4B1s',

@@ -2,9 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FirebaseError } from 'firebase/app';
 import {
   loginAdminFromFirestoreDoc,
+  loginDoctorWithGoogle,
   loginWithFirebase,
   logoutFromFirebase,
   resolveDashboardRole,
@@ -36,12 +36,17 @@ export default function LoginPage() {
     if (selectedRole === 'DOCTOR') {
       setEmail('doctor@afryamama.org');
     } else {
-      setEmail('admin@afryamama.org');
+      setEmail('KristieNoela@afyamama.com');
     }
   };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (role === 'DOCTOR') {
+      return;
+    }
+
     setLoading(true);
     setError('');
 
@@ -72,7 +77,7 @@ export default function LoginPage() {
       }
 
       router.push(resolvedRole === 'ADMIN' ? '/admin/dashboard' : '/doctor/dashboard');
-    } catch (err) {
+    } catch (err: unknown) {
       if (role === 'ADMIN') {
         const isFirestoreAdmin = await loginAdminFromFirestoreDoc(email, password);
         if (isFirestoreAdmin) {
@@ -85,18 +90,68 @@ export default function LoginPage() {
         }
       }
 
-      if (err instanceof FirebaseError) {
-        if (err.code === 'auth/user-not-found') {
+      const errorCode =
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        typeof (err as { code?: unknown }).code === 'string'
+          ? (err as { code: string }).code
+          : null;
+
+      if (errorCode) {
+        if (errorCode === 'auth/user-not-found') {
           setError('This email is not registered in Firebase Authentication.');
-        } else if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        } else if (errorCode === 'auth/wrong-password' || errorCode === 'auth/invalid-credential') {
           setError('Incorrect password or email.');
-        } else if (err.code === 'auth/too-many-requests') {
+        } else if (errorCode === 'auth/too-many-requests') {
           setError('Too many attempts. Please wait and try again.');
         } else {
-          setError(`Login failed: ${err.code}`);
+          setError(`Login failed: ${errorCode}`);
         }
       } else {
         setError('Login failed. Please verify your Firebase credentials.');
+      }
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDoctorGoogleLogin = async () => {
+    setLoading(true);
+    setError('');
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem('afyamama-fallback-role');
+      window.localStorage.removeItem('afyamama-fallback-email');
+    }
+
+    try {
+      const credential = await loginDoctorWithGoogle();
+      const resolvedRole = await resolveDashboardRole(credential.user);
+
+      if (resolvedRole !== 'DOCTOR') {
+        await logoutFromFirebase();
+        setError('This Google account is not registered as a doctor in Firestore.');
+        return;
+      }
+
+      router.push('/doctor/dashboard');
+    } catch (err: unknown) {
+      const errorCode =
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        typeof (err as { code?: unknown }).code === 'string'
+          ? (err as { code: string }).code
+          : null;
+
+      if (errorCode === 'auth/popup-closed-by-user') {
+        setError('Google sign-in was cancelled.');
+      } else if (errorCode === 'auth/popup-blocked') {
+        setError('Popup was blocked by your browser. Please allow popups and try again.');
+      } else {
+        setError('Google sign-in failed. Please try again.');
       }
       console.error(err);
     } finally {
@@ -132,29 +187,33 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <div className="form-group">
-            <label className="form-label" htmlFor="email">Work Email</label>
-            <input 
-              className="form-input"
-              type="email" 
-              id="email" 
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </div>
+          {role === 'ADMIN' && (
+            <>
+              <div className="form-group">
+                <label className="form-label" htmlFor="email">Work Email</label>
+                <input
+                  className="form-input"
+                  type="email"
+                  id="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
 
-          <div className="form-group">
-            <label className="form-label" htmlFor="password">Security Password</label>
-            <input 
-              className="form-input"
-              type="password" 
-              id="password" 
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="password">Security Password</label>
+                <input
+                  className="form-input"
+                  type="password"
+                  id="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+            </>
+          )}
 
           {error && (
             <p style={{ color: 'var(--danger)', fontSize: '13px', margin: '-10px 0 16px 0', textAlign: 'left' }}>
@@ -162,14 +221,27 @@ export default function LoginPage() {
             </p>
           )}
 
-          <button 
-            type="submit" 
-            className={`btn ${role === 'DOCTOR' ? 'btn-primary' : 'btn-accent'}`}
-            style={{ width: '100%', padding: '14px', fontSize: '15px' }}
-            disabled={loading}
-          >
-            {loading ? 'Authenticating...' : `Enter ${role === 'DOCTOR' ? 'Clinician' : 'Admin'} Workspace`}
-          </button>
+          {role === 'DOCTOR' ? (
+            <button
+              type="button"
+              className="btn btn-primary btn-google"
+              style={{ width: '100%', padding: '14px', fontSize: '15px' }}
+              disabled={loading}
+              onClick={handleDoctorGoogleLogin}
+            >
+              <span className="google-icon" aria-hidden="true">G</span>
+              {loading ? 'Connecting Google...' : 'Continue with Google'}
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className="btn btn-accent"
+              style={{ width: '100%', padding: '14px', fontSize: '15px' }}
+              disabled={loading}
+            >
+              {loading ? 'Authenticating...' : 'Enter Admin Workspace'}
+            </button>
+          )}
         </form>
       </div>
     </div>

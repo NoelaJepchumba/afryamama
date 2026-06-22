@@ -1,21 +1,30 @@
 import {
-  signInWithEmailAndPassword,
-  signOut,
-  type User,
-} from 'firebase/auth';
-import {
   collection,
   doc,
   getDoc,
   getDocs,
+  GoogleAuthProvider,
   limit,
   query,
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  signOut,
   where,
-  type QueryDocumentSnapshot,
-} from 'firebase/firestore';
-import { firebaseAuth, firebaseDb } from '@/lib/firebaseClient';
+  firebaseAuth,
+  firebaseDb,
+} from '@/lib/firebaseClient';
 
 export type DashboardRole = 'DOCTOR' | 'ADMIN';
+
+type FirebaseUser = {
+  uid: string;
+  email: string | null;
+};
+
+type FirestoreDocSnapshot = {
+  id: string;
+  data(): Record<string, unknown>;
+};
 
 function normalizeEmail(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -34,7 +43,7 @@ function normalizePassword(value: unknown): string {
 }
 
 function matchesUserDoc(
-  docSnapshot: QueryDocumentSnapshot,
+  docSnapshot: FirestoreDocSnapshot,
   email: string,
   uid: string
 ): boolean {
@@ -64,7 +73,7 @@ async function findMatchingDoc(
   collectionNames: string[],
   email: string,
   uid: string
-): Promise<QueryDocumentSnapshot | null> {
+): Promise<FirestoreDocSnapshot | null> {
   for (const collectionName of collectionNames) {
     const emailFields = ['email', 'Email', 'userEmail', 'user_email'];
 
@@ -77,7 +86,9 @@ async function findMatchingDoc(
     }
 
     const fullSnapshot = await getDocs(collection(firebaseDb, collectionName));
-    const matchingDoc = fullSnapshot.docs.find((docSnapshot) => matchesUserDoc(docSnapshot, email, uid));
+    const matchingDoc = fullSnapshot.docs.find((docSnapshot: FirestoreDocSnapshot) =>
+      matchesUserDoc(docSnapshot, email, uid)
+    );
     if (matchingDoc) {
       return matchingDoc;
     }
@@ -100,7 +111,7 @@ async function existsInCollection(collectionName: string, email: string, uid: st
   return !!docMatch;
 }
 
-export async function resolveDashboardRole(user: User): Promise<DashboardRole | null> {
+export async function resolveDashboardRole(user: FirebaseUser): Promise<DashboardRole | null> {
   const email = user.email?.trim().toLowerCase();
   if (!email) return null;
   const uid = user.uid;
@@ -119,6 +130,11 @@ export async function resolveDashboardRole(user: User): Promise<DashboardRole | 
 
 export async function loginWithFirebase(email: string, password: string) {
   return signInWithEmailAndPassword(firebaseAuth, email, password);
+}
+
+export async function loginDoctorWithGoogle() {
+  const provider = new GoogleAuthProvider();
+  return signInWithPopup(firebaseAuth, provider);
 }
 
 export async function loginAdminFromFirestoreDoc(email: string, password: string): Promise<boolean> {

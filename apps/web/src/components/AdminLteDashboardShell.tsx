@@ -30,11 +30,13 @@ export default function AdminLteDashboardShell({ role, allowedRoles, children }:
     <RoleGuard allowedRoles={resolvedAllowedRoles}>
       <DashboardLayout
         menuItems={menuItems}
+        logo={<span style={{ fontWeight: 700, letterSpacing: '0.02em' }}>AfyaMama</span>}
         fixedHeader
         fixedSidebar
         colorModeToggle
         user={userModel}
         topbarEnd={<TopbarAccountMenu role={effectiveRole} />}
+        footer={null}
       >
         {children}
       </DashboardLayout>

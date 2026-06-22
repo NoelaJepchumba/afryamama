@@ -1,8 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged, type User } from 'firebase/auth';
-import { firebaseAuth } from '@/lib/firebaseClient';
+import { firebaseAuth, onAuthStateChanged, type User } from '@/lib/firebaseClient';
 import { resolveDashboardRole, type DashboardRole } from '@/lib/firebaseAuth';
 
 interface AuthContextValue {
