@@ -6,7 +6,7 @@ interface ProfileScreenProps {
   email: string;
   onBack: () => void;
 }
-
+// getting the profile
 export default function ProfileScreen({ email, onBack }: ProfileScreenProps) {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<MobileMotherProfile | null>(null);
