@@ -1,15 +1,33 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity } from 'react-native';
+import { fetchRecords, type MobileRecord } from '../lib/firestoreData';
 
 interface RecordsProps {
+  email: string;
   onBack: () => void;
 }
 
-export default function RecordsScreen({ onBack }: RecordsProps) {
-  const records = [
-    { id: 'mr-1', date: 'June 10, 2026', weight: '72.5 kg', bp: '120/80', hr: '78 bpm', notes: 'Pregnancy progress is normal. Recommended iron supplements, continue light exercise.' },
-    { id: 'mr-2', date: 'May 05, 2026', weight: '70.1 kg', bp: '118/78', hr: '74 bpm', notes: 'First prenatal checkup. Blood panels came back clear. Healthy starting weight.' }
-  ];
+export default function RecordsScreen({ email, onBack }: RecordsProps) {
+  const [records, setRecords] = useState<MobileRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadRecords() {
+      try {
+        if (!email) {
+          setRecords([]);
+          return;
+        }
+
+        const rows = await fetchRecords(email.toLowerCase());
+        setRecords(rows);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadRecords();
+  }, [email]);
 
   return (
     <View style={styles.container}>
@@ -23,11 +41,17 @@ export default function RecordsScreen({ onBack }: RecordsProps) {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.sectionTitle}>Maternal Progress Logs</Text>
 
+        {loading ? <Text style={styles.emptyText}>Loading records...</Text> : null}
+
+        {!loading && records.length === 0 ? (
+          <Text style={styles.emptyText}>No prenatal records found in Firestore.</Text>
+        ) : null}
+
         {records.map((rec) => (
           <View style={styles.recordCard} key={rec.id}>
             <View style={styles.cardHeader}>
               <Text style={styles.recordDate}>{rec.date}</Text>
-              <Text style={styles.clinicName}>AfyaMama Clinic</Text>
+              <Text style={styles.clinicName}>Clinical Record</Text>
             </View>
 
             <View style={styles.vitalsRow}>
@@ -93,6 +117,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 16,
+  },
+  emptyText: {
+    color: '#94a3b8',
+    fontSize: 13,
+    marginBottom: 12,
   },
   recordCard: {
     backgroundColor: '#121826',

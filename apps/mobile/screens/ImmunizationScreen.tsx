@@ -1,19 +1,39 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity } from 'react-native';
+import { fetchImmunizationData, type MobileVaccine } from '../lib/firestoreData';
 
 interface ImmunizationProps {
+  email: string;
   onBack: () => void;
 }
 
-export default function ImmunizationScreen({ onBack }: ImmunizationProps) {
-  const vaccines = [
-    { id: 'v-1', name: 'BCG (Tuberculosis)', scheduled: 'At birth', administered: 'Oct 02, 2025', status: 'COMPLETED' },
-    { id: 'v-2', name: 'OPV 0 (Polio)', scheduled: 'At birth', administered: 'Oct 02, 2025', status: 'COMPLETED' },
-    { id: 'v-3', name: 'Pentavalent 1 (DPT, HepB, Hib)', scheduled: '6 Weeks', administered: 'Nov 12, 2025', status: 'COMPLETED' },
-    { id: 'v-4', name: 'OPV 1 (Polio oral dose)', scheduled: '6 Weeks', administered: 'Nov 12, 2025', status: 'COMPLETED' },
-    { id: 'v-5', name: 'Pentavalent 2', scheduled: '10 Weeks', administered: 'Dec 18, 2025', status: 'COMPLETED' },
-    { id: 'v-6', name: 'Measles-Rubella 1', scheduled: '9 Months', administered: undefined, status: 'PENDING' }
-  ];
+export default function ImmunizationScreen({ email, onBack }: ImmunizationProps) {
+  const [loading, setLoading] = useState(true);
+  const [childName, setChildName] = useState('Child Profile');
+  const [childBirth, setChildBirth] = useState('Birth date not set');
+  const [vaccines, setVaccines] = useState<MobileVaccine[]>([]);
+
+  useEffect(() => {
+    async function loadImmunization() {
+      try {
+        if (!email) {
+          setVaccines([]);
+          return;
+        }
+
+        const payload = await fetchImmunizationData(email.toLowerCase());
+        if (payload.child) {
+          setChildName(payload.child.childName);
+          setChildBirth(payload.child.childBirth);
+        }
+        setVaccines(payload.vaccines);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadImmunization();
+  }, [email]);
 
   return (
     <View style={styles.container}>
@@ -28,12 +48,18 @@ export default function ImmunizationScreen({ onBack }: ImmunizationProps) {
         <View style={styles.childHeaderCard}>
           <Text style={styles.childIcon}>👶</Text>
           <View>
-            <Text style={styles.childName}>Baby Baraka</Text>
-            <Text style={styles.childBirth}>Born: Oct 01, 2025 • Male</Text>
+            <Text style={styles.childName}>{childName}</Text>
+            <Text style={styles.childBirth}>Born: {childBirth}</Text>
           </View>
         </View>
 
         <Text style={styles.sectionTitle}>Immunization Schedule</Text>
+
+        {loading ? <Text style={styles.emptyText}>Loading immunization records...</Text> : null}
+
+        {!loading && vaccines.length === 0 ? (
+          <Text style={styles.emptyText}>No vaccine records found in Firestore.</Text>
+        ) : null}
 
         {vaccines.map((v) => (
           <View style={styles.vaccineRow} key={v.id}>
@@ -122,6 +148,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 16,
+  },
+  emptyText: {
+    color: '#94a3b8',
+    fontSize: 13,
+    marginBottom: 12,
   },
   vaccineRow: {
     flexDirection: 'row',

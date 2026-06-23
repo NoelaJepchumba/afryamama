@@ -3,11 +3,89 @@ import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Dimensions } from
 
 interface DashboardProps {
   userName: string;
+  pregnancyWeek: number | null;
+  nextAppointmentText: string | null;
   onNavigate: (screen: string) => void;
   onLogout: () => void;
 }
 
-export default function MotherDashboardScreen({ userName, onNavigate, onLogout }: DashboardProps) {
+export default function MotherDashboardScreen({
+  userName,
+  pregnancyWeek,
+  nextAppointmentText,
+  onNavigate,
+  onLogout,
+}: DashboardProps) {
+  const weekLabel = pregnancyWeek ? `Week ${pregnancyWeek}` : 'Pregnancy tracking pending';
+  const progressPercent = pregnancyWeek ? Math.min(Math.max((pregnancyWeek / 40) * 100, 0), 100) : 0;
+  const progressWidth = `${progressPercent}%` as `${number}%`;
+
+  const menuItems = [
+    {
+      screen: 'IMMUNIZATION',
+      color: '#10b981',
+      icon: '💉',
+      title: 'Immunizations',
+      desc: 'Child vaccine schedule',
+    },
+    {
+      screen: 'RECORDS',
+      color: '#ec4899',
+      icon: '📝',
+      title: 'Health Records',
+      desc: 'Prenatal checkup logs',
+    },
+    {
+      screen: 'PROFILE',
+      color: '#38bdf8',
+      icon: '👩',
+      title: 'Profile',
+      desc: 'Mother account details',
+    },
+    {
+      screen: 'SCHEDULE',
+      color: '#a78bfa',
+      icon: '🗓️',
+      title: 'Schedule',
+      desc: 'Clinic visit timeline',
+    },
+    {
+      screen: 'MILESTONES',
+      color: '#22d3ee',
+      icon: '🎯',
+      title: 'Milestones',
+      desc: 'Pregnancy progress goals',
+    },
+    {
+      screen: 'APPOINTMENTS',
+      color: '#8b5cf6',
+      icon: '📅',
+      title: 'Appointments',
+      desc: 'Booked and pending visits',
+    },
+    {
+      screen: 'NOTIFICATIONS',
+      color: '#f59e0b',
+      icon: '🔔',
+      title: 'Notifications',
+      desc: 'Reminders and alerts',
+    },
+    {
+      screen: 'WELLNESS',
+      color: '#f97316',
+      icon: '📘',
+      title: 'What You Need To Know',
+      desc: 'Care tips and guidance',
+    },
+    {
+      screen: 'GROWTH',
+      color: '#34d399',
+      icon: '📈',
+      title: 'Growth Monitoring',
+      desc: 'Child growth charts',
+    },
+  ];
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <View style={styles.header}>
@@ -23,12 +101,12 @@ export default function MotherDashboardScreen({ userName, onNavigate, onLogout }
       {/* Pregnancy Status Card */}
       <View style={styles.statusCard}>
         <Text style={styles.cardTag}>PREGNANCY STATUS</Text>
-        <Text style={styles.cardHeader}>Week 21</Text>
-        <Text style={styles.cardSub}>Second Trimester • 133 days to Estimated Due Date</Text>
+        <Text style={styles.cardHeader}>{weekLabel}</Text>
+        <Text style={styles.cardSub}>Synced from your Firebase maternal profile</Text>
         
         {/* Simple Progress Bar */}
         <View style={styles.progressTrack}>
-          <View style={[styles.progressBar, { width: '52.5%' }]} />
+          <View style={[styles.progressBar, { width: progressWidth }]} />
         </View>
         <View style={styles.progressLabels}>
           <Text style={styles.progressLabelText}>Conception</Text>
@@ -40,49 +118,19 @@ export default function MotherDashboardScreen({ userName, onNavigate, onLogout }
       {/* Quick Action Grid */}
       <Text style={styles.sectionTitle}>Maternal Care Menu</Text>
       <View style={styles.grid}>
-        <TouchableOpacity 
-          style={styles.gridCard} 
-          onPress={() => onNavigate('APPOINTMENTS')}
-        >
-          <View style={[styles.gridIconBg, { backgroundColor: '#8b5cf6' }]}>
-            <Text style={styles.gridIcon}>📅</Text>
-          </View>
-          <Text style={styles.gridTitle}>Appointments</Text>
-          <Text style={styles.gridDesc}>1 Upcoming visit</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.gridCard}
-          onPress={() => onNavigate('RECORDS')}
-        >
-          <View style={[styles.gridIconBg, { backgroundColor: '#ec4899' }]}>
-            <Text style={styles.gridIcon}>📝</Text>
-          </View>
-          <Text style={styles.gridTitle}>Checkup Records</Text>
-          <Text style={styles.gridDesc}>Maternal observations</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.gridCard}
-          onPress={() => onNavigate('IMMUNIZATION')}
-        >
-          <View style={[styles.gridIconBg, { backgroundColor: '#10b981' }]}>
-            <Text style={styles.gridIcon}>💉</Text>
-          </View>
-          <Text style={styles.gridTitle}>Baby Baraka</Text>
-          <Text style={styles.gridDesc}>Vaccine checklist</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.gridCard}
-          onPress={() => onNavigate('WELLNESS')}
-        >
-          <View style={[styles.gridIconBg, { backgroundColor: '#f59e0b' }]}>
-            <Text style={styles.gridIcon}>💡</Text>
-          </View>
-          <Text style={styles.gridTitle}>Wellness Tips</Text>
-          <Text style={styles.gridDesc}>Prenatal guides</Text>
-        </TouchableOpacity>
+        {menuItems.map((item) => (
+          <TouchableOpacity
+            key={item.title}
+            style={styles.gridCard}
+            onPress={() => onNavigate(item.screen)}
+          >
+            <View style={[styles.gridIconBg, { backgroundColor: item.color }]}>
+              <Text style={styles.gridIcon}>{item.icon}</Text>
+            </View>
+            <Text style={styles.gridTitle}>{item.title}</Text>
+            <Text style={styles.gridDesc}>{item.desc}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
       {/* Next Appointment Alert */}
@@ -92,7 +140,9 @@ export default function MotherDashboardScreen({ userName, onNavigate, onLogout }
           <Text style={styles.alertHeaderTitle}>Upcoming Prenatal Visit</Text>
         </View>
         <Text style={styles.alertText}>
-          You have a prenatal checkup scheduled with Dr. Jane Mwangi on June 25 at 10:00 AM.
+          {nextAppointmentText
+            ? `You have a prenatal checkup scheduled on ${nextAppointmentText}.`
+            : 'No upcoming prenatal appointment is linked yet in your profile.'}
         </Text>
       </View>
     </ScrollView>

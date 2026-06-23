@@ -3,12 +3,15 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
-    "@afryamama/types": "*",
     "@afryamama/api": "*",
-    "expo": "~56.0.12",
-    "expo-status-bar": "~56.0.4",
-    "react": "19.2.3",
-    "react-native": "0.85.3"
+    "@afryamama/types": "*",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~54.0.20",
+    "expo-status-bar": "~3.0.8",
+    "firebase": "^12.15.0",
+    "react": "^19.1.0",
+    "react-native": "^0.81.4",
+    "react-native-safe-area-context": "~5.6.0"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",

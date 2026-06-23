@@ -2,15 +2,31 @@ import React, { useState } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Dimensions } from 'react-native';
 
 interface LoginScreenProps {
-  onLoginSuccess: (email: string) => void;
+  onLoginSuccess: (email: string, password: string) => Promise<void>;
 }
 
 export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const [email, setEmail] = useState('mother@afryamama.org');
   const [password, setPassword] = useState('password');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleLogin = () => {
-    onLoginSuccess(email);
+  const handleLogin = async () => {
+    if (!email.trim() || !password.trim()) {
+      setError('Email and password are required.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      await onLoginSuccess(email, password);
+    } catch {
+      setError('Login failed. Check credentials and try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -53,8 +69,10 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           </View>
 
           <TouchableOpacity style={styles.button} onPress={handleLogin}>
-            <Text style={styles.buttonText}>Log In</Text>
+            <Text style={styles.buttonText}>{loading ? 'Signing in...' : 'Log In'}</Text>
           </TouchableOpacity>
+
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
       </View>
     </KeyboardAvoidingView>
@@ -145,5 +163,12 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 16,
+  },
+  errorText: {
+    marginTop: 12,
+    color: '#ef4444',
+    fontSize: 13,
+    textAlign: 'center',
+    fontWeight: '600',
   },
 });

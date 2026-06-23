@@ -1,15 +1,33 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, FlatList } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity } from 'react-native';
+import { fetchAppointments, type MobileAppointment } from '../lib/firestoreData';
 
 interface AppointmentsProps {
+  email: string;
   onBack: () => void;
 }
 
-export default function AppointmentsScreen({ onBack }: AppointmentsProps) {
-  const [appointments, setAppointments] = useState([
-    { id: '1', date: 'June 25, 2026', time: '10:00 AM', doctor: 'Dr. Jane Mwangi', reason: 'Trimester 2 Routine Scan', status: 'PENDING' },
-    { id: '2', date: 'May 10, 2026', time: '09:00 AM', doctor: 'Dr. Jane Mwangi', reason: 'Trimester 1 Labs', status: 'COMPLETED' },
-  ]);
+export default function AppointmentsScreen({ email, onBack }: AppointmentsProps) {
+  const [appointments, setAppointments] = useState<MobileAppointment[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadAppointments() {
+      try {
+        if (!email) {
+          setAppointments([]);
+          return;
+        }
+
+        const rows = await fetchAppointments(email.toLowerCase());
+        setAppointments(rows);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadAppointments();
+  }, [email]);
 
   return (
     <View style={styles.container}>
@@ -23,6 +41,12 @@ export default function AppointmentsScreen({ onBack }: AppointmentsProps) {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.sectionTitle}>Upcoming Consultations</Text>
         
+        {loading ? <Text style={styles.emptyText}>Loading appointments...</Text> : null}
+
+        {!loading && appointments.length === 0 ? (
+          <Text style={styles.emptyText}>No appointments found in your Firestore records.</Text>
+        ) : null}
+
         {appointments.map((appt) => (
           <View style={styles.apptCard} key={appt.id}>
             <View style={styles.cardHeader}>
@@ -48,8 +72,8 @@ export default function AppointmentsScreen({ onBack }: AppointmentsProps) {
           </View>
         ))}
 
-        <TouchableOpacity style={styles.bookBtn}>
-          <Text style={styles.bookBtnText}>+ Request New Appointment</Text>
+        <TouchableOpacity style={styles.bookBtn} disabled>
+          <Text style={styles.bookBtnText}>Appointment requests are managed by clinic staff</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -91,6 +115,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 16,
+  },
+  emptyText: {
+    color: '#94a3b8',
+    fontSize: 13,
+    marginBottom: 12,
   },
   apptCard: {
     backgroundColor: '#121826',

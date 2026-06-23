@@ -1,40 +1,43 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity } from 'react-native';
+import { fetchWellnessTips, type MobileTip } from '../lib/firestoreData';
 
 interface WellnessTipsProps {
+  email: string;
   onBack: () => void;
 }
 
-export default function WellnessTipsScreen({ onBack }: WellnessTipsProps) {
-  const tips = [
-    {
-      id: 'wt-1',
-      title: 'Importance of Folic Acid',
-      category: 'PRENATAL NUTRITION',
-      content: 'Folic acid helps prevent neural tube defects in your developing baby. It is recommended to take 400 mcg daily before conception and throughout the first trimester. Focus on foods like leafy greens, citrus, and beans.',
-      bg: 'rgba(139, 92, 246, 0.1)',
-      border: 'rgba(139, 92, 246, 0.2)',
-      tagColor: '#8b5cf6'
-    },
-    {
-      id: 'wt-2',
-      title: 'Staying Hydrated During Pregnancy',
-      category: 'MATERNAL HEALTH',
-      content: 'Expectant mothers should aim for at least 8 to 10 glasses of water daily. Proper hydration supports amniotic fluid levels, improves circulation, and decreases the risk of urinary tract infections.',
-      bg: 'rgba(236, 72, 153, 0.1)',
-      border: 'rgba(236, 72, 153, 0.2)',
-      tagColor: '#ec4899'
-    },
-    {
-      id: 'wt-3',
-      title: 'Preparing for Exclusive Breastfeeding',
-      category: 'INFANT NUTRITION',
-      content: 'Breast milk provides optimal nutrition and critical antibodies for the first six months. Learn latching techniques and consult with your midwife or pediatrician to set up a comfortable nursing routine early.',
-      bg: 'rgba(16, 185, 129, 0.1)',
-      border: 'rgba(16, 185, 129, 0.2)',
-      tagColor: '#10b981'
+export default function WellnessTipsScreen({ email, onBack }: WellnessTipsProps) {
+  const [loading, setLoading] = useState(true);
+  const [tips, setTips] = useState<MobileTip[]>([]);
+
+  useEffect(() => {
+    async function loadTips() {
+      try {
+        if (!email) {
+          setTips([]);
+          return;
+        }
+
+        const rows = await fetchWellnessTips(email.toLowerCase());
+        setTips(rows);
+      } finally {
+        setLoading(false);
+      }
     }
-  ];
+
+    loadTips();
+  }, [email]);
+
+  function cardStyles(index: number) {
+    const themes = [
+      { bg: 'rgba(139, 92, 246, 0.1)', border: 'rgba(139, 92, 246, 0.2)', tagColor: '#8b5cf6' },
+      { bg: 'rgba(236, 72, 153, 0.1)', border: 'rgba(236, 72, 153, 0.2)', tagColor: '#ec4899' },
+      { bg: 'rgba(16, 185, 129, 0.1)', border: 'rgba(16, 185, 129, 0.2)', tagColor: '#10b981' },
+      { bg: 'rgba(245, 158, 11, 0.1)', border: 'rgba(245, 158, 11, 0.2)', tagColor: '#f59e0b' },
+    ];
+    return themes[index % themes.length];
+  }
 
   return (
     <View style={styles.container}>
@@ -48,17 +51,25 @@ export default function WellnessTipsScreen({ onBack }: WellnessTipsProps) {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.sectionTitle}>Daily Guidance Cards</Text>
 
-        {tips.map((tip) => (
-          <View style={[styles.tipCard, { backgroundColor: tip.bg, borderColor: tip.border }]} key={tip.id}>
-            <Text style={[styles.tipCategory, { color: tip.tagColor }]}>{tip.category}</Text>
+        {loading ? <Text style={styles.emptyText}>Loading wellness tips...</Text> : null}
+
+        {!loading && tips.length === 0 ? (
+          <Text style={styles.emptyText}>No wellness tips found in Firestore.</Text>
+        ) : null}
+
+        {tips.map((tip, index) => {
+          const theme = cardStyles(index);
+          return (
+          <View style={[styles.tipCard, { backgroundColor: theme.bg, borderColor: theme.border }]} key={tip.id}>
+            <Text style={[styles.tipCategory, { color: theme.tagColor }]}>{tip.category}</Text>
             <Text style={styles.tipTitle}>{tip.title}</Text>
             <Text style={styles.tipContent}>{tip.content}</Text>
             
             <TouchableOpacity style={styles.readMoreBtn}>
-              <Text style={[styles.readMoreText, { color: tip.tagColor }]}>Read full article →</Text>
+              <Text style={[styles.readMoreText, { color: theme.tagColor }]}>Read full article →</Text>
             </TouchableOpacity>
           </View>
-        ))}
+        );})}
       </ScrollView>
     </View>
   );
@@ -99,6 +110,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 16,
+  },
+  emptyText: {
+    color: '#94a3b8',
+    fontSize: 13,
+    marginBottom: 12,
   },
   tipCard: {
     borderWidth: 1,
