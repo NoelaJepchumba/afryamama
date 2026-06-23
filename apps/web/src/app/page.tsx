@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   loginAdminFromFirestoreDoc,
@@ -163,7 +164,7 @@ export default function LoginPage() {
     <div className="auth-wrapper">
       <div className="auth-card">
         <div className="auth-header">
-          <div className="brand-logo" style={{ margin: '0 auto 16px auto' }}>A</div>
+          <div className="brand-logo" style={{ margin: '0 auto 16px auto' }}>AM</div>
           <h1 className="auth-title">Welcome to AfyaMama</h1>
           <p className="auth-subtitle">Clinical & Administrative Portal</p>
         </div>
@@ -211,6 +212,14 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                 />
+                <div style={{ marginTop: 8, textAlign: 'center' }}>
+                  <Link
+                    href={`/admin-forgot-password?email=${encodeURIComponent(email.trim().toLowerCase())}`}
+                    style={{ fontSize: '13px', color: 'var(--primary)' }}
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
               </div>
             </>
           )}
