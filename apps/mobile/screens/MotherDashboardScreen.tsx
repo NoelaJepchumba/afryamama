@@ -5,6 +5,7 @@ import {
   fetchChildrenProfiles,
   fetchImmunizationData,
   fetchMotherProfileDetails,
+  fetchNotifications,
   fetchRecords,
   type MobileAppointment,
   type MobileMotherProfileDetails,
@@ -29,28 +30,26 @@ export default function MotherDashboardScreen({
   onNavigate,
   onLogout,
 }: DashboardProps) {
-  const isPrenatal = pregnancyWeek !== null;
-  const weekLabel = pregnancyWeek ? `Week ${pregnancyWeek}` : 'Pregnancy tracking pending';
-  const progressPercent = pregnancyWeek ? Math.min(Math.max((pregnancyWeek / 40) * 100, 0), 100) : 0;
-  const progressWidth = `${progressPercent}%` as `${number}%`;
   const [loadingInsights, setLoadingInsights] = useState(true);
   const [profileDetails, setProfileDetails] = useState<MobileMotherProfileDetails | null>(null);
   const [appointments, setAppointments] = useState<MobileAppointment[]>([]);
   const [vaccines, setVaccines] = useState<MobileVaccine[]>([]);
   const [records, setRecords] = useState<MobileRecord[]>([]);
   const [childCount, setChildCount] = useState(0);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   useEffect(() => {
     async function loadInsights() {
       try {
         if (!userEmail) return;
 
-        const [details, appts, immunization, recs, children] = await Promise.all([
+        const [details, appts, immunization, recs, children, notifications] = await Promise.all([
           fetchMotherProfileDetails(userEmail.toLowerCase()),
           fetchAppointments(userEmail.toLowerCase()),
           fetchImmunizationData(userEmail.toLowerCase()),
           fetchRecords(userEmail.toLowerCase()),
           fetchChildrenProfiles(userEmail.toLowerCase()),
+          fetchNotifications(userEmail.toLowerCase()),
         ]);
 
         setProfileDetails(details);
@@ -58,6 +57,7 @@ export default function MotherDashboardScreen({
         setVaccines(immunization.vaccines);
         setRecords(recs);
         setChildCount(children.length || details?.childrenCount || 0);
+        setUnreadNotifications(notifications.filter((item) => !item.read).length);
       } finally {
         setLoadingInsights(false);
       }
@@ -66,7 +66,58 @@ export default function MotherDashboardScreen({
     loadInsights();
   }, [userEmail]);
 
-  const stageLabel = profileDetails?.stage === 'POSTNATAL' ? 'Postnatal' : 'Prenatal';
+  const profilePregnancyWeek = useMemo(() => {
+    const parsed = Number.parseInt(profileDetails?.pregnancyWeek || '', 10);
+    if (Number.isNaN(parsed)) return null;
+    return parsed;
+  }, [profileDetails?.pregnancyWeek]);
+
+  const activePregnancyWeek = pregnancyWeek ?? profilePregnancyWeek;
+  const prenatalProgressPercent = activePregnancyWeek
+    ? Math.min(Math.max((activePregnancyWeek / 40) * 100, 0), 100)
+    : 0;
+  const reachedDueDate = prenatalProgressPercent >= 100;
+  const recordStagePostnatal = profileDetails?.stage === 'POSTNATAL';
+  const isPostnatalView = recordStagePostnatal || reachedDueDate;
+
+  const babyAgeMonthsNumber = useMemo(() => {
+    const parsed = Number.parseInt(profileDetails?.babyAgeMonths || '', 10);
+    if (Number.isNaN(parsed)) return null;
+    return parsed;
+  }, [profileDetails?.babyAgeMonths]);
+
+  const postnatalProgressPercent = babyAgeMonthsNumber
+    ? Math.min(Math.max((babyAgeMonthsNumber / 24) * 100, 0), 100)
+    : 0;
+
+  const progressPercent = isPostnatalView ? postnatalProgressPercent : prenatalProgressPercent;
+  const progressWidth = `${progressPercent}%` as `${number}%`;
+  const stageLabel = isPostnatalView ? 'Postnatal' : 'Prenatal';
+  const babyAgeMonths = profileDetails?.babyAgeMonths || 'Not set';
+  const interfaceTag = isPostnatalView ? 'POSTNATAL CARE STATUS' : 'PRENATAL CARE STATUS';
+  const interfaceHeader = isPostnatalView
+    ? `${babyAgeMonths} months postpartum`
+    : activePregnancyWeek
+      ? `Week ${activePregnancyWeek}`
+      : 'Pregnancy tracking pending';
+  const interfaceSub = isPostnatalView
+    ? 'Track baby growth, vaccines and mother recovery follow-ups.'
+    : 'Track your pregnancy week and upcoming ANC checkups.';
+  const interfaceStartLabel = isPostnatalView ? 'Birth' : 'Conception';
+  const interfaceEndLabel = isPostnatalView ? '24 months' : 'Due Date';
+  const phaseSpotlightTitle = isPostnatalView ? 'Postnatal Focus' : 'Prenatal Focus';
+  const phaseSpotlightItems = isPostnatalView
+    ? [
+        'Track baby growth points weekly',
+        'Keep vaccine calendar up to date',
+        'Monitor mother recovery signs',
+      ]
+    : [
+        'Never miss ANC appointments',
+        'Log blood pressure and warning signs',
+        'Follow trimester wellness guidance',
+      ];
+  const autoTransitionNote = reachedDueDate && !recordStagePostnatal;
 
   const nearestVisitLabel = useMemo(() => {
     if (nextAppointmentText) return nextAppointmentText;
@@ -147,78 +198,123 @@ export default function MotherDashboardScreen({
     return 'No blood pressure risk pattern detected from recent records.';
   }, [records]);
 
-  const menuItems = [
-    {
-      screen: 'IMMUNIZATION',
-      color: '#10b981',
-      icon: '💉',
-      title: 'Immunizations',
-      desc: 'Child vaccine schedule',
-    },
-    {
-      screen: 'RECORDS',
-      color: '#ec4899',
-      icon: '📝',
-      title: 'Health Records',
-      desc: 'Prenatal checkup logs',
-    },
-    {
-      screen: 'PROFILE',
-      color: '#38bdf8',
-      icon: '👩',
-      title: 'Profile',
-      desc: 'Mother account details',
-    },
-    {
-      screen: 'SCHEDULE',
-      color: '#a78bfa',
-      icon: '🗓️',
-      title: 'Schedule',
-      desc: 'Clinic visit timeline',
-    },
-    {
-      screen: 'TIMELINE',
-      color: '#0ea5e9',
-      icon: '🧭',
-      title: 'Timeline',
-      desc: 'All care events in one feed',
-    },
-    {
-      screen: 'MILESTONES',
-      color: '#22d3ee',
-      icon: '🎯',
-      title: 'Milestones',
-      desc: 'Pregnancy progress goals',
-    },
-    {
-      screen: 'APPOINTMENTS',
-      color: '#8b5cf6',
-      icon: '📅',
-      title: 'Appointments',
-      desc: 'Booked and pending visits',
-    },
-    {
-      screen: 'NOTIFICATIONS',
-      color: '#f59e0b',
-      icon: '🔔',
-      title: 'Notifications',
-      desc: 'Reminders and alerts',
-    },
-    {
-      screen: 'WELLNESS',
-      color: '#f97316',
-      icon: '📘',
-      title: 'What You Need To Know',
-      desc: 'Care tips and guidance',
-    },
-    {
-      screen: 'GROWTH',
-      color: '#34d399',
-      icon: '📈',
-      title: 'Growth Monitoring',
-      desc: 'Child growth charts',
-    },
-  ];
+  const menuItems = isPostnatalView
+    ? [
+        {
+          screen: 'IMMUNIZATION',
+          color: '#10b981',
+          icon: '💉',
+          title: 'Immunizations',
+          desc: 'Child vaccine schedule',
+        },
+        {
+          screen: 'GROWTH',
+          color: '#34d399',
+          icon: '📈',
+          title: 'Growth Monitoring',
+          desc: 'Child growth charts',
+        },
+        {
+          screen: 'APPOINTMENTS',
+          color: '#8b5cf6',
+          icon: '📅',
+          title: 'Appointments',
+          desc: 'Postnatal and infant visits',
+        },
+        {
+          screen: 'SCHEDULE',
+          color: '#a78bfa',
+          icon: '🗓️',
+          title: 'Schedule',
+          desc: 'Clinic visit timeline',
+        },
+        {
+          screen: 'TIMELINE',
+          color: '#0ea5e9',
+          icon: '🧭',
+          title: 'Timeline',
+          desc: 'All care events in one feed',
+        },
+        {
+          screen: 'NOTIFICATIONS',
+          color: '#f59e0b',
+          icon: '🔔',
+          title: 'Notifications',
+          desc: 'Reminders and alerts',
+        },
+        {
+          screen: 'WELLNESS',
+          color: '#f97316',
+          icon: '📘',
+          title: 'What You Need To Know',
+          desc: 'Recovery and newborn guidance',
+        },
+        {
+          screen: 'PROFILE',
+          color: '#38bdf8',
+          icon: '👩',
+          title: 'Profile',
+          desc: 'Mother account details',
+        },
+      ]
+    : [
+        {
+          screen: 'APPOINTMENTS',
+          color: '#8b5cf6',
+          icon: '📅',
+          title: 'Appointments',
+          desc: 'Booked and pending ANC visits',
+        },
+        {
+          screen: 'RECORDS',
+          color: '#ec4899',
+          icon: '📝',
+          title: 'Health Records',
+          desc: 'Prenatal checkup logs',
+        },
+        {
+          screen: 'MILESTONES',
+          color: '#22d3ee',
+          icon: '🎯',
+          title: 'Milestones',
+          desc: 'Pregnancy progress goals',
+        },
+        {
+          screen: 'SCHEDULE',
+          color: '#a78bfa',
+          icon: '🗓️',
+          title: 'Schedule',
+          desc: 'Clinic visit timeline',
+        },
+        {
+          screen: 'TIMELINE',
+          color: '#0ea5e9',
+          icon: '🧭',
+          title: 'Timeline',
+          desc: 'All care events in one feed',
+        },
+        {
+          screen: 'NOTIFICATIONS',
+          color: '#f59e0b',
+          icon: '🔔',
+          title: 'Notifications',
+          desc: 'Reminders and alerts',
+        },
+        {
+          screen: 'WELLNESS',
+          color: '#f97316',
+          icon: '📘',
+          title: 'What You Need To Know',
+          desc: 'Pregnancy care tips and guidance',
+        },
+        {
+          screen: 'PROFILE',
+          color: '#38bdf8',
+          icon: '👩',
+          title: 'Profile',
+          desc: 'Mother account details',
+        },
+      ];
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
@@ -245,22 +341,38 @@ export default function MotherDashboardScreen({
           <Text style={styles.statusPillLabel}>Children</Text>
           <Text style={styles.statusPillValue}>{childCount}</Text>
         </View>
+        <View style={styles.statusPill}>
+          <Text style={styles.statusPillLabel}>Alerts</Text>
+          <Text style={styles.statusPillValue}>{unreadNotifications} unread</Text>
+        </View>
       </View>
 
       {/* Pregnancy Status Card */}
       <View style={styles.statusCard}>
-        <Text style={styles.cardTag}>PREGNANCY STATUS</Text>
-        <Text style={styles.cardHeader}>{weekLabel}</Text>
-        <Text style={styles.cardSub}>Synced from your Firebase maternal profile</Text>
+        <Text style={styles.cardTag}>{interfaceTag}</Text>
+        <Text style={styles.cardHeader}>{interfaceHeader}</Text>
+        <Text style={styles.cardSub}>{interfaceSub}</Text>
+
+        {autoTransitionNote ? (
+          <View style={styles.transitionCard}>
+            <Text style={styles.transitionTitle}>You reached your due-date milestone.</Text>
+            <Text style={styles.transitionBody}>
+              Your dashboard has shifted to postnatal mode so you can focus on recovery and infant care.
+            </Text>
+            <TouchableOpacity style={styles.transitionButton} onPress={() => onNavigate('PROFILE')}>
+              <Text style={styles.transitionButtonText}>Complete Postnatal Profile</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
         
         {/* Simple Progress Bar */}
         <View style={styles.progressTrack}>
           <View style={[styles.progressBar, { width: progressWidth }]} />
         </View>
         <View style={styles.progressLabels}>
-          <Text style={styles.progressLabelText}>{isPrenatal ? 'Conception' : 'Delivery'}</Text>
+          <Text style={styles.progressLabelText}>{interfaceStartLabel}</Text>
           <Text style={styles.progressLabelText}>{Math.round(progressPercent)}%</Text>
-          <Text style={styles.progressLabelText}>{isPrenatal ? 'Due Date' : 'Infant Follow-up'}</Text>
+          <Text style={styles.progressLabelText}>{interfaceEndLabel}</Text>
         </View>
       </View>
 
@@ -278,8 +390,23 @@ export default function MotherDashboardScreen({
       <View style={styles.infoCard}>
         <Text style={styles.infoCardTitle}>Smart Reminders</Text>
         <Text style={styles.infoCardBody}>Missed follow-ups: {missedCount}</Text>
-        <Text style={styles.infoCardBody}>Vaccines due in 7 days: {dueSoonVaccines}</Text>
+        {isPostnatalView ? (
+          <Text style={styles.infoCardBody}>Vaccines due in 7 days: {dueSoonVaccines}</Text>
+        ) : (
+          <Text style={styles.infoCardBody}>
+            Weeks to due date: {activePregnancyWeek ? Math.max(40 - activePregnancyWeek, 0) : 'Unknown'}
+          </Text>
+        )}
+        <Text style={styles.infoCardBody}>Unread notifications: {unreadNotifications}</Text>
         <Text style={styles.infoCardHint}>Tap Timeline for full event history.</Text>
+      </View>
+
+      <View style={styles.phaseSpotlightCard}>
+        <Text style={styles.phaseSpotlightTag}>PHASE SPOTLIGHT</Text>
+        <Text style={styles.phaseSpotlightTitle}>{phaseSpotlightTitle}</Text>
+        {phaseSpotlightItems.map((item) => (
+          <Text key={item} style={styles.phaseSpotlightItem}>• {item}</Text>
+        ))}
       </View>
 
       <View style={styles.infoCard}>
@@ -297,6 +424,11 @@ export default function MotherDashboardScreen({
             style={styles.gridCard}
             onPress={() => onNavigate(item.screen)}
           >
+            {item.screen === 'NOTIFICATIONS' && unreadNotifications > 0 ? (
+              <View style={styles.pingBadge}>
+                <Text style={styles.pingBadgeText}>PING</Text>
+              </View>
+            ) : null}
             <View style={[styles.gridIconBg, { backgroundColor: item.color }]}>
               <Text style={styles.gridIcon}>{item.icon}</Text>
             </View>
@@ -314,8 +446,8 @@ export default function MotherDashboardScreen({
         </View>
         <Text style={styles.alertText}>
           {nextAppointmentText
-            ? `You have a prenatal checkup scheduled on ${nextAppointmentText}.`
-            : 'No upcoming prenatal appointment is linked yet in your profile.'}
+            ? `You have a ${isPostnatalView ? 'postnatal' : 'prenatal'} checkup scheduled on ${nextAppointmentText}.`
+            : `No upcoming ${isPostnatalView ? 'postnatal' : 'prenatal'} appointment is linked yet in your profile.`}
         </Text>
       </View>
     </ScrollView>
@@ -412,6 +544,38 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: 10,
   },
+  transitionCard: {
+    marginBottom: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#86efac',
+    backgroundColor: '#f0fdf4',
+    padding: 12,
+  },
+  transitionTitle: {
+    color: '#166534',
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  transitionBody: {
+    color: '#166534',
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  transitionButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#16a34a',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+  },
+  transitionButtonText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
   codeBadge: {
     alignSelf: 'flex-start',
     backgroundColor: '#eff6ff',
@@ -467,6 +631,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
+  phaseSpotlightCard: {
+    backgroundColor: '#0f172a',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+  },
+  phaseSpotlightTag: {
+    color: '#93c5fd',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    marginBottom: 6,
+  },
+  phaseSpotlightTitle: {
+    color: '#f8fafc',
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  phaseSpotlightItem: {
+    color: '#cbd5e1',
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 2,
+  },
   progressLabelText: {
     color: '#334155',
     fontSize: 11,
@@ -485,6 +674,7 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
   gridCard: {
+    position: 'relative',
     width: '48%',
     backgroundColor: '#ffffff',
     borderWidth: 1,
@@ -518,6 +708,22 @@ const styles = StyleSheet.create({
   gridDesc: {
     color: '#475569',
     fontSize: 12,
+  },
+  pingBadge: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: '#ef4444',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    zIndex: 2,
+  },
+  pingBadgeText: {
+    color: '#ffffff',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.6,
   },
   alertBox: {
     backgroundColor: '#ffffff',

@@ -10,6 +10,7 @@ interface NotificationsScreenProps {
 export default function NotificationsScreen({ email, onBack }: NotificationsScreenProps) {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<MobileNotification[]>([]);
+  const unreadCount = items.filter((item) => !item.read).length;
 
   useEffect(() => {
     async function loadNotifications() {
@@ -43,6 +44,12 @@ export default function NotificationsScreen({ email, onBack }: NotificationsScre
           <Text style={styles.heroTag}>CARE ALERTS</Text>
           <Text style={styles.heroTitle}>Notifications</Text>
           <Text style={styles.heroText}>Important reminders and updates from your care journey appear here.</Text>
+          {!loading ? (
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryText}>{unreadCount} unread alerts</Text>
+              {unreadCount > 0 ? <Text style={styles.summaryPing}>PING</Text> : null}
+            </View>
+          ) : null}
         </View>
 
         {loading ? <Text style={styles.emptyText}>Loading notifications...</Text> : null}
@@ -55,7 +62,10 @@ export default function NotificationsScreen({ email, onBack }: NotificationsScre
           <View style={styles.card} key={item.id}>
             <View style={styles.row}>
               <Text style={styles.cardTitle}>{item.title}</Text>
-              <Text style={item.read ? styles.readTag : styles.unreadTag}>{item.read ? 'READ' : 'NEW'}</Text>
+              <View style={styles.tagRow}>
+                {!item.read ? <Text style={styles.pingTag}>PING</Text> : null}
+                <Text style={item.read ? styles.readTag : styles.unreadTag}>{item.read ? 'READ' : 'NEW'}</Text>
+              </View>
             </View>
             <Text style={styles.cardDate}>{item.date} • {item.type}</Text>
             <Text style={styles.cardMessage}>{item.message}</Text>
@@ -123,6 +133,27 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  summaryRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  summaryText: {
+    color: '#0f172a',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  summaryPing: {
+    color: '#ffffff',
+    backgroundColor: '#ef4444',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
   emptyText: {
     color: '#94a3b8',
     fontSize: 13,
@@ -141,6 +172,21 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 6,
+  },
+  tagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  pingTag: {
+    color: '#ffffff',
+    backgroundColor: '#ef4444',
+    fontSize: 9,
+    fontWeight: '800',
+    borderRadius: 999,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    letterSpacing: 0.6,
   },
   cardTitle: {
     color: '#0f172a',

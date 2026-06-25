@@ -17,6 +17,7 @@ import TimelineScreen from './screens/TimelineScreen';
 import MilestonesScreen from './screens/MilestonesScreen';
 import NotificationsScreen from './screens/NotificationsScreen';
 import GrowthMonitoringScreen from './screens/GrowthMonitoringScreen';
+import { firebaseAuth } from './lib/firebaseClient';
 import {
   loadMotherProfile,
   loginWithFirebase,

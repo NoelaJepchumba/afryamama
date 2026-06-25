@@ -31,6 +31,9 @@ export default function LoginScreen({
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [signupLoading, setSignupLoading] = useState(false);
@@ -100,6 +103,11 @@ export default function LoginScreen({
       return;
     }
 
+    if (password !== confirmPassword) {
+      setError('Password and confirm password do not match.');
+      return;
+    }
+
     setSignupLoading(true);
     setError(null);
     setInfo(null);
@@ -112,6 +120,7 @@ export default function LoginScreen({
       setFullName('');
       setEmail('');
       setPassword('');
+      setConfirmPassword('');
 
       setIsSignUp(false);
     } catch (err) {
@@ -167,6 +176,8 @@ export default function LoginScreen({
                 setError(null);
                 setInfo(null);
                 setIsSignUp(false);
+                setShowPassword(false);
+                setShowConfirmPassword(false);
               }}
             >
               <Text style={[styles.modeTabText, !isSignUp ? styles.modeTabTextActive : null]}>Log In</Text>
@@ -177,6 +188,8 @@ export default function LoginScreen({
                 setError(null);
                 setInfo(null);
                 setIsSignUp(true);
+                setShowPassword(false);
+                setShowConfirmPassword(false);
               }}
             >
               <Text style={[styles.modeTabText, isSignUp ? styles.modeTabTextActive : null]}>Sign Up</Text>
@@ -218,14 +231,43 @@ export default function LoginScreen({
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Password</Text>
-            <TextInput
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              placeholder="Enter your password"
-            />
+            <View style={styles.passwordRow}>
+              <TextInput
+                style={styles.passwordInput}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+                placeholder="Enter your password"
+              />
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowPassword((current) => !current)}
+              >
+                <Text style={styles.eyeButtonText}>{showPassword ? 'Hide' : 'Show'}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
+
+          {isSignUp ? (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Confirm Password</Text>
+              <View style={styles.passwordRow}>
+                <TextInput
+                  style={styles.passwordInput}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry={!showConfirmPassword}
+                  placeholder="Confirm your password"
+                />
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setShowConfirmPassword((current) => !current)}
+                >
+                  <Text style={styles.eyeButtonText}>{showConfirmPassword ? 'Hide' : 'Show'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
 
             {!isSignUp ? (
             <>
@@ -255,6 +297,8 @@ export default function LoginScreen({
                   setError(null);
                   setInfo(null);
                   setIsSignUp(true);
+                  setShowPassword(false);
+                  setShowConfirmPassword(false);
                 }}
               >
                 <Text style={styles.switchButtonText}>
@@ -281,6 +325,8 @@ export default function LoginScreen({
                   setError(null);
                   setInfo(null);
                   setIsSignUp(false);
+                  setShowPassword(false);
+                  setShowConfirmPassword(false);
                 }}
               >
                 <Text style={styles.switchButtonText}>
@@ -411,6 +457,29 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 13,
     backgroundColor: '#f9fafb',
+  },
+  passwordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 10,
+    backgroundColor: '#f9fafb',
+  },
+  passwordInput: {
+    flex: 1,
+    padding: 13,
+  },
+  eyeButton: {
+    borderLeftWidth: 1,
+    borderLeftColor: '#d1d5db',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  eyeButtonText: {
+    color: '#4f46e5',
+    fontWeight: '600',
+    fontSize: 12,
   },
   button: {
     backgroundColor: '#6d28d9',

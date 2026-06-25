@@ -55,7 +55,6 @@ function InfoRow({ label, value }: { label: string; value: string }) {
     </View>
   );
 }
-<<<<<<< HEAD
 
 function FieldInput({
   label, value, onChange, keyboardType, locked,
@@ -80,12 +79,6 @@ function FieldInput({
     </View>
   );
 }
-=======
-// getting the profile
-export default function ProfileScreen({ email, onBack }: ProfileScreenProps) {
-  const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<MobileMotherProfile | null>(null);
->>>>>>> ed8fe420f0e6be165a1b86af86f10b8a2af3261c
 
 // ── SCREEN ────────────────────────────────────
 interface Props {
