@@ -137,9 +137,6 @@ export default function AppointmentsPage() {
             <h1 className="page-title">Appointments Scheduler</h1>
             <p className="page-subtitle">Schedule clinical consultations, track antenatal care (ANC) visits, and infant checkups.</p>
           </div>
-          <div>
-            <button className="btn btn-primary">+ Schedule Consultation</button>
-          </div>
         </div>
 
         <div className="content-card">

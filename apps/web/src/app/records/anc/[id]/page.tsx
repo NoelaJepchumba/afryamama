@@ -1,5 +1,6 @@
 "use client";
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { addDoc, collection, doc, getDoc, getDocs } from 'firebase/firestore';
@@ -182,6 +183,24 @@ export default function AncDetailsPage({ params }: AncDetailsPageProps) {
         createdAt: new Date().toISOString(),
       });
 
+      if (form.nextVisit) {
+        await addDoc(collection(firebaseDb, 'appointments'), {
+          motherId,
+          mother_id: motherId,
+          motherName: mother.name,
+          doctorEmail: user?.email || '',
+          doctorUid: user?.uid || '',
+          appointmentType: 'ANC FOLLOW-UP',
+          type: 'ANC',
+          reason: `ANC follow-up (${form.contactNo})`,
+          status: 'PENDING',
+          date: form.nextVisit,
+          dateTime: form.nextVisit,
+          sourceRecord: 'ANC',
+          createdAt: new Date().toISOString(),
+        });
+      }
+
       setVisits((prev) => [
         {
           id: created.id,
@@ -207,6 +226,11 @@ export default function AncDetailsPage({ params }: AncDetailsPageProps) {
     <main className="main-content">
       <div className="header-container">
         <div>
+          <div style={{ marginBottom: '10px' }}>
+            <Link href={motherId ? `/mothers/${motherId}` : '/mothers'} className="btn btn-secondary btn-compact">
+              Back
+            </Link>
+          </div>
           <h1 className="page-title">ANC Visit Details</h1>
           <p className="page-subtitle">Live Firestore maternal appointment details.</p>
         </div>

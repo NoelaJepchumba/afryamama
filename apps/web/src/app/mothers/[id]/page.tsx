@@ -212,6 +212,12 @@ export default function MotherDetailsPage({ params }: MotherDetailsPageProps) {
     return `ANC: ${ancHistory.length} | PNC: ${pncHistory.length} | Child: ${childHistory.length}`;
   }, [ancHistory.length, childHistory.length, pncHistory.length]);
 
+  const statusUpper = mother.status.trim().toUpperCase();
+  const isPrenatal = statusUpper.includes('PRENATAL') || statusUpper.includes('PREG');
+  const isPostnatal = statusUpper.includes('POSTNATAL') || statusUpper.includes('POST NATAL') || statusUpper.includes('PNC');
+  const showAncAction = isPrenatal || (!isPrenatal && !isPostnatal);
+  const showPostnatalActions = isPostnatal;
+
   return (
     <main className="main-content">
       <div className="header-container">
@@ -220,9 +226,9 @@ export default function MotherDetailsPage({ params }: MotherDetailsPageProps) {
           <p className="page-subtitle">History and visit actions for ANC, PNC, and Child follow-up.</p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <Link href={`/records/anc/${motherId}`} className="btn btn-primary">+ Add ANC Visit</Link>
-          <Link href={`/records/mother/${motherId}`} className="btn btn-secondary">+ Add PNC Visit</Link>
-          <Link href={`/records/child/${motherId}`} className="btn btn-secondary">+ Add Child Visit</Link>
+          {showAncAction ? <Link href={`/records/anc/${motherId}`} className="btn btn-primary">+ Add ANC Visit</Link> : null}
+          {showPostnatalActions ? <Link href={`/records/mother/${motherId}`} className="btn btn-secondary">+ Add PNC Visit</Link> : null}
+          {showPostnatalActions ? <Link href={`/records/child/${motherId}`} className="btn btn-secondary">+ Add Child Visit</Link> : null}
         </div>
       </div>
 
@@ -244,128 +250,134 @@ export default function MotherDetailsPage({ params }: MotherDetailsPageProps) {
         )}
       </div>
 
-      <div className="content-card card-spaced">
-        <div className="card-header">
-          <span>ANC History</span>
-          <Link href={`/records/anc/${motherId}`} className="btn btn-secondary btn-compact">
-            Open ANC
-          </Link>
-        </div>
-        <div className="table-container">
-          <table className="custom-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Source</th>
-                <th>Details</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
+      {showAncAction ? (
+        <div className="content-card card-spaced">
+          <div className="card-header">
+            <span>ANC History</span>
+            <Link href={`/records/anc/${motherId}`} className="btn btn-secondary btn-compact">
+              Open ANC
+            </Link>
+          </div>
+          <div className="table-container">
+            <table className="custom-table">
+              <thead>
                 <tr>
-                  <td colSpan={4}>Loading ANC history...</td>
+                  <th>Date</th>
+                  <th>Source</th>
+                  <th>Details</th>
+                  <th>Status</th>
                 </tr>
-              ) : ancHistory.length === 0 ? (
-                <tr>
-                  <td colSpan={4}>No ANC history found.</td>
-                </tr>
-              ) : (
-                ancHistory.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.date}</td>
-                    <td>{row.source}</td>
-                    <td>{row.details}</td>
-                    <td>{row.status}</td>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td colSpan={4}>Loading ANC history...</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : ancHistory.length === 0 ? (
+                  <tr>
+                    <td colSpan={4}>No ANC history found.</td>
+                  </tr>
+                ) : (
+                  ancHistory.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.date}</td>
+                      <td>{row.source}</td>
+                      <td>{row.details}</td>
+                      <td>{row.status}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : null}
 
-      <div className="content-card card-spaced">
-        <div className="card-header">
-          <span>PNC History</span>
-          <Link href={`/records/mother/${motherId}`} className="btn btn-secondary btn-compact">
-            Open PNC
-          </Link>
-        </div>
-        <div className="table-container">
-          <table className="custom-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Source</th>
-                <th>Details</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
+      {showPostnatalActions ? (
+        <div className="content-card card-spaced">
+          <div className="card-header">
+            <span>PNC History</span>
+            <Link href={`/records/mother/${motherId}`} className="btn btn-secondary btn-compact">
+              Open PNC
+            </Link>
+          </div>
+          <div className="table-container">
+            <table className="custom-table">
+              <thead>
                 <tr>
-                  <td colSpan={4}>Loading PNC history...</td>
+                  <th>Date</th>
+                  <th>Source</th>
+                  <th>Details</th>
+                  <th>Status</th>
                 </tr>
-              ) : pncHistory.length === 0 ? (
-                <tr>
-                  <td colSpan={4}>No PNC history found.</td>
-                </tr>
-              ) : (
-                pncHistory.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.date}</td>
-                    <td>{row.source}</td>
-                    <td>{row.details}</td>
-                    <td>{row.status}</td>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td colSpan={4}>Loading PNC history...</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : pncHistory.length === 0 ? (
+                  <tr>
+                    <td colSpan={4}>No PNC history found.</td>
+                  </tr>
+                ) : (
+                  pncHistory.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.date}</td>
+                      <td>{row.source}</td>
+                      <td>{row.details}</td>
+                      <td>{row.status}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : null}
 
-      <div className="content-card">
-        <div className="card-header">
-          <span>Child Progress History</span>
-          <Link href={`/records/child/${motherId}`} className="btn btn-secondary btn-compact">
-            Open Child Record
-          </Link>
-        </div>
-        <div className="table-container">
-          <table className="custom-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Source</th>
-                <th>Details</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
+      {showPostnatalActions ? (
+        <div className="content-card">
+          <div className="card-header">
+            <span>Child Progress History</span>
+            <Link href={`/records/child/${motherId}`} className="btn btn-secondary btn-compact">
+              Open Child Record
+            </Link>
+          </div>
+          <div className="table-container">
+            <table className="custom-table">
+              <thead>
                 <tr>
-                  <td colSpan={4}>Loading child history...</td>
+                  <th>Date</th>
+                  <th>Source</th>
+                  <th>Details</th>
+                  <th>Status</th>
                 </tr>
-              ) : childHistory.length === 0 ? (
-                <tr>
-                  <td colSpan={4}>No child progress history found.</td>
-                </tr>
-              ) : (
-                childHistory.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.date}</td>
-                    <td>{row.source}</td>
-                    <td>{row.details}</td>
-                    <td>{row.status}</td>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td colSpan={4}>Loading child history...</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : childHistory.length === 0 ? (
+                  <tr>
+                    <td colSpan={4}>No child progress history found.</td>
+                  </tr>
+                ) : (
+                  childHistory.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.date}</td>
+                      <td>{row.source}</td>
+                      <td>{row.details}</td>
+                      <td>{row.status}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : null}
     </main>
   );
 }
