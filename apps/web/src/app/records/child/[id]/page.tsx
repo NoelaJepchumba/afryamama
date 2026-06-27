@@ -166,11 +166,13 @@ export default function ChildRecordPage({ params }: ChildRecordPageProps) {
       setMotherId(id);
 
       try {
-        const [mothersSnapshot, childrenSnapshot, childSnapshot, immunizationSnapshot, growthSnapshot, growthAltSnapshot] = await Promise.all([
+        const [mothersSnapshot, childrenSnapshot, childSnapshot, immunizationSnapshot, growthSnapshot, growthAltSnapshot, growthLegacySnapshot] = await Promise.all([
           getDocs(collection(firebaseDb, 'mothers')),
           getDocs(collection(firebaseDb, 'children')),
           getDocs(collection(firebaseDb, 'child')),
           getDocs(collection(firebaseDb, 'immunizations')),
+          getDocs(collection(firebaseDb, 'child_growth')),
+          getDocs(collection(firebaseDb, 'growthRecords')),
           getDocs(collection(firebaseDb, 'growthRecords')),
           getDocs(collection(firebaseDb, 'growth_records')),
         ]);
@@ -236,7 +238,7 @@ export default function ChildRecordPage({ params }: ChildRecordPageProps) {
             childId: childDoc.id,
           });
 
-          const growthData = [...growthSnapshot.docs, ...growthAltSnapshot.docs]
+          const growthData = [...growthSnapshot.docs, ...growthAltSnapshot.docs, ...growthLegacySnapshot.docs]
             .map((item) => ({ id: item.id, ...item.data() }))
             .filter((row: any) => row.childId === childDoc.id || row.child_id === childDoc.id)
             .map((row: any) => ({
@@ -300,7 +302,7 @@ export default function ChildRecordPage({ params }: ChildRecordPageProps) {
 
     setSavingGrowth(true);
     try {
-      const created = await addDoc(collection(firebaseDb, 'growthRecords'), {
+      const created = await addDoc(collection(firebaseDb, 'child_growth'), {
         motherId,
         childId: summary.childId,
         child_id: summary.childId,

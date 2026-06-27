@@ -29,25 +29,55 @@ export default function AdminProfilePage() {
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [documentPath, setDocumentPath] = useState<{ collectionName: string; docId: string } | null>(null);
+  const [fallbackEmail, setFallbackEmail] = useState('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedFallbackEmail = window.localStorage.getItem('afyamama-fallback-email') || '';
+    setFallbackEmail(storedFallbackEmail.trim().toLowerCase());
+  }, []);
+
+  const effectiveEmail = (user?.email || fallbackEmail || '').trim();
+  const effectiveUid = (user?.uid || '').trim();
 
   useEffect(() => {
     async function loadProfile() {
-      if (!user?.email) {
+      if (!effectiveEmail) {
         setLoading(false);
         return;
       }
 
       const canonicalCollection = 'Admins';
-      const canonicalDocId = user.uid || user.email || 'admin-profile';
+      const canonicalDocId = effectiveUid || effectiveEmail || 'admin-profile';
       const canonicalRef = doc(firebaseDb, canonicalCollection, canonicalDocId);
       const canonicalDoc = await getDoc(canonicalRef);
 
+      function toNameParts(data: Record<string, unknown>): { firstName: string; lastName: string } {
+        const directFirst = (data.firstName || data.first_name || '').toString().trim();
+        const directLast = (data.lastName || data.last_name || '').toString().trim();
+        if (directFirst || directLast) {
+          return { firstName: directFirst, lastName: directLast };
+        }
+
+        const combined = (data.fullName || data.name || data.username || '').toString().trim();
+        if (!combined) {
+          return { firstName: '', lastName: '' };
+        }
+
+        const parts = combined.split(/\s+/).filter(Boolean);
+        return {
+          firstName: parts[0] || combined,
+          lastName: parts.slice(1).join(' '),
+        };
+      }
+
       if (canonicalDoc.exists()) {
         const data = canonicalDoc.data();
+        const nameParts = toNameParts(data as Record<string, unknown>);
         setProfile({
-          firstName: data.firstName || data.first_name || '',
-          lastName: data.lastName || data.last_name || '',
-          email: data.email || user.email,
+          firstName: nameParts.firstName,
+          lastName: nameParts.lastName,
+          email: data.email || data.Email || data.userEmail || data.user_email || effectiveEmail,
           phone: data.phone || '',
           title: data.title || data.role || data.Role || 'ADMIN',
         });
@@ -56,32 +86,58 @@ export default function AdminProfilePage() {
         return;
       }
 
-      const collections = ['Admins', 'admins'];
+      const collections = ['Admins'];
       let matchedData: Record<string, unknown> | null = null;
       let matchedPath: { collectionName: string; docId: string } | null = null;
 
       for (const name of collections) {
-        const candidate = await getDocs(
-          query(collection(firebaseDb, name), where('email', '==', user.email), limit(1))
-        );
-        if (!candidate.empty) {
-          matchedData = candidate.docs[0].data() as Record<string, unknown>;
-          matchedPath = { collectionName: name, docId: candidate.docs[0].id };
+        const emailFields = ['email', 'Email', 'userEmail', 'user_email'];
+        for (const fieldName of emailFields) {
+          const candidate = await getDocs(
+            query(collection(firebaseDb, name), where(fieldName, '==', effectiveEmail), limit(1))
+          );
+          if (!candidate.empty) {
+            matchedData = candidate.docs[0].data() as Record<string, unknown>;
+            matchedPath = { collectionName: name, docId: candidate.docs[0].id };
+            break;
+          }
+        }
+
+        if (matchedData && matchedPath) {
           break;
         }
       }
 
+      if (!matchedData && effectiveEmail) {
+        const allDocs = await getDocs(collection(firebaseDb, canonicalCollection));
+        const normalizedEmail = effectiveEmail.toLowerCase();
+        const matchedByNormalizedEmail = allDocs.docs.find((docItem) => {
+          const data = docItem.data() as Record<string, unknown>;
+          const candidates = [data.email, data.Email, data.userEmail, data.user_email]
+            .map((value) => (typeof value === 'string' ? value.trim().toLowerCase() : ''))
+            .filter(Boolean);
+          return candidates.includes(normalizedEmail);
+        });
+
+        if (matchedByNormalizedEmail) {
+          matchedData = matchedByNormalizedEmail.data() as Record<string, unknown>;
+          matchedPath = { collectionName: canonicalCollection, docId: matchedByNormalizedEmail.id };
+        }
+      }
+
       if (!matchedData || !matchedPath) {
-        setProfile((prev) => ({ ...prev, email: user.email || prev.email, title: prev.title || 'ADMIN' }));
+        setProfile((prev) => ({ ...prev, email: effectiveEmail || prev.email, title: prev.title || 'ADMIN' }));
         setDocumentPath({ collectionName: canonicalCollection, docId: canonicalDocId });
         setLoading(false);
         return;
       }
 
+      const nameParts = toNameParts(matchedData);
+
       setProfile({
-        firstName: matchedData.firstName || matchedData.first_name || '',
-        lastName: matchedData.lastName || matchedData.last_name || '',
-        email: matchedData.email || user.email,
+        firstName: nameParts.firstName,
+        lastName: nameParts.lastName,
+        email: matchedData.email || matchedData.Email || matchedData.userEmail || matchedData.user_email || effectiveEmail,
         phone: matchedData.phone || '',
         title: matchedData.title || matchedData.role || matchedData.Role || 'ADMIN',
       });
@@ -90,17 +146,17 @@ export default function AdminProfilePage() {
     }
 
     loadProfile();
-  }, [user?.email, user?.uid]);
+  }, [effectiveEmail, effectiveUid]);
 
   async function saveProfile() {
-    if (!user?.email) {
+    if (!effectiveEmail) {
       setSaveError('You must be logged in to update profile.');
       setSaveMessage(null);
       return;
     }
 
     const targetCollection = documentPath?.collectionName || 'Admins';
-    const targetDocId = documentPath?.docId || user.uid || user.email;
+    const targetDocId = documentPath?.docId || effectiveUid || effectiveEmail;
     const isNewDocument = !documentPath;
 
     setSaving(true);
@@ -111,13 +167,16 @@ export default function AdminProfilePage() {
       const payload: Record<string, unknown> = {
         firstName: profile.firstName.trim(),
         lastName: profile.lastName.trim(),
-        email: user.email,
+        email: effectiveEmail,
         phone: profile.phone.trim(),
         title: profile.title.trim(),
         role: 'ADMIN',
         updatedAt: serverTimestamp(),
-        uid: user.uid,
       };
+
+      if (effectiveUid) {
+        payload.uid = effectiveUid;
+      }
 
       if (isNewDocument) {
         payload.createdAt = serverTimestamp();

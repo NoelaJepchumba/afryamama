@@ -129,12 +129,14 @@ export default function RecordsPage() {
       }
 
       try {
-        const [mothersSnapshot, pregnanciesSnapshot, maternalSnapshot, childrenSnapshot, growthSnapshot, immunizationSnapshot] =
+        const [mothersSnapshot, pregnanciesSnapshot, maternalSnapshot, pncSnapshot, childrenSnapshot, growthSnapshot, growthLegacySnapshot, immunizationSnapshot] =
           await Promise.all([
             getDocs(collection(firebaseDb, 'mothers')),
             getDocs(collection(firebaseDb, 'pregnancies')),
             getDocs(collection(firebaseDb, 'maternalRecords')),
+            getDocs(collection(firebaseDb, 'pncRecords')),
             getDocs(collection(firebaseDb, 'children')),
+            getDocs(collection(firebaseDb, 'child_growth')),
             getDocs(collection(firebaseDb, 'growthRecords')),
             getDocs(collection(firebaseDb, 'immunizations')),
           ]);
@@ -161,7 +163,7 @@ export default function RecordsPage() {
           if (motherId) pregnanciesByMotherId.set(motherId, data);
         });
 
-        const combinedMaternal: MaternalRow[] = maternalSnapshot.docs
+        const combinedMaternal: MaternalRow[] = [...maternalSnapshot.docs, ...pncSnapshot.docs]
           .map((docItem) => {
             const data = docItem.data() as Record<string, unknown>;
             return { id: docItem.id, data };
@@ -197,7 +199,7 @@ export default function RecordsPage() {
           .sort((a, b) => b.checkupDate.localeCompare(a.checkupDate));
 
         const growthByChildId = new Map<string, Record<string, unknown>>();
-        growthSnapshot.docs.forEach((docItem) => {
+        [...growthSnapshot.docs, ...growthLegacySnapshot.docs].forEach((docItem) => {
           const data = docItem.data() as Record<string, unknown>;
           const dateValue = data.checkupDate ?? data.date ?? data.createdAt;
           if (!isForCurrentDoctor(data, doctorEmail, doctorUid) || !isToday(dateValue)) return;
@@ -291,7 +293,7 @@ export default function RecordsPage() {
     try {
       const dateIso = new Date(`${visitDate}T09:00:00`).toISOString();
 
-      if (visitType === 'ANC' || visitType === 'PNC') {
+      if (visitType === 'ANC') {
         await addDoc(collection(firebaseDb, 'maternalRecords'), {
           motherId: selectedMother?.id || '',
           motherName: selectedMother?.name || '',
@@ -310,8 +312,27 @@ export default function RecordsPage() {
           doctorEmail: user?.email || '',
           createdAt: new Date().toISOString(),
         });
+      } else if (visitType === 'PNC') {
+        await addDoc(collection(firebaseDb, 'pncRecords'), {
+          motherId: selectedMother?.id || '',
+          motherName: selectedMother?.name || '',
+          type: 'PNC',
+          visitType: 'PNC',
+          recordType: 'PNC',
+          stage: 'POSTNATAL',
+          checkupDate: dateIso,
+          date: dateIso,
+          weight: weight.trim(),
+          bloodPressure: bp.trim(),
+          bp: bp.trim(),
+          clinicalObservations: notes.trim(),
+          notes: notes.trim(),
+          doctorUid: user?.uid || '',
+          doctorEmail: user?.email || '',
+          createdAt: new Date().toISOString(),
+        });
       } else {
-        await addDoc(collection(firebaseDb, 'growthRecords'), {
+        await addDoc(collection(firebaseDb, 'child_growth'), {
           childId: selectedChild?.id || '',
           childName: selectedChild?.name || '',
           motherId: selectedChild?.motherId || '',

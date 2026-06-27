@@ -6,7 +6,7 @@
   "scripts": {
     "dev:server": "npm run dev -w server",
     "dev:web": "npm run dev -w apps/web",
-    "dev:mobile": "npm run start -w apps/mobile --",
+    "dev:mobile": "set EXPO_NO_DEPENDENCY_VALIDATION=1&& set EXPO_OFFLINE=1&& npm run start -w apps/mobile --",
     "run:mobile:android": "npm exec -w apps/mobile expo run:android",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

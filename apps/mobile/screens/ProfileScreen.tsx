@@ -20,13 +20,12 @@ import {
   limit,
   query,
   setDoc,
-  updateDoc,
   deleteDoc,
   serverTimestamp,
   where,
 } from 'firebase/firestore';
 import { firebaseDb as db } from '../lib/firebaseClient';
-import { assignDoctorForFacility, reserveDoctorForMother } from '../lib/motherProfileStore';
+import { assignDoctorForFacility, deleteMotherAccountByEmail, reserveDoctorForMother } from '../lib/motherProfileStore';
 
 // ── TYPES ─────────────────────────────────────
 type Stage = 'PRENATAL' | 'POSTNATAL';
@@ -59,6 +58,66 @@ type MotherProfile = {
   children?:             ChildProfile[];
   createdAt?:            any;
 };
+
+function readText(value: unknown, fallback = ''): string {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number') return String(value);
+  return fallback;
+}
+
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function getMotherDocIdFromEmail(value: string): string {
+  return normalizeEmail(value).replace(/[^a-z0-9]/gi, '_');
+}
+
+function profileScore(data: MotherProfile): number {
+  const fieldScore = [
+    data.fullName,
+    data.phone,
+    data.email,
+    data.county,
+    data.facility,
+    data.emergencyContactName,
+    data.emergencyContactPhone,
+    data.assignedDoctorId || '',
+    data.assignedDoctorName || '',
+    data.assignedDoctorFacility || '',
+    data.motherCode,
+  ].filter((item) => item && item.trim()).length;
+
+  const childrenScore = Array.isArray(data.children) ? data.children.length * 2 : 0;
+  return fieldScore + childrenScore;
+}
+
+function normalizeProfileRecord(raw: Record<string, unknown>): MotherProfile {
+  const firstName = readText(raw.firstName || raw.first_name, '');
+  const lastName = readText(raw.lastName || raw.last_name, '');
+  const combinedName = `${firstName} ${lastName}`.trim();
+
+  return {
+    fullName: readText(raw.fullName || raw.full_name || raw.name, combinedName || ''),
+    email: readText(raw.email || raw.Email || raw.userEmail || raw.user_email, ''),
+    phone: readText(raw.phone || raw.phoneNumber || raw.tel, ''),
+    motherCode: readText(raw.motherCode || raw.mother_code || raw.code, ''),
+    stage: readText(raw.stage || raw.motherStage, 'PRENATAL').toUpperCase() === 'POSTNATAL' ? 'POSTNATAL' : 'PRENATAL',
+    pregnancyWeek: readText(raw.pregnancyWeek || raw.week || raw.currentWeek, ''),
+    babyAgeMonths: readText(raw.babyAgeMonths || raw.baby_months || raw.infantAgeMonths, ''),
+    county: readText(raw.county, ''),
+    facility: readText(raw.facility || raw.preferredFacility, ''),
+    emergencyContactName: readText(raw.emergencyContactName || raw.emergency_name, ''),
+    emergencyContactPhone: readText(raw.emergencyContactPhone || raw.emergency_phone, ''),
+    assignedDoctorId: readText(raw.assignedDoctorId || raw.primaryDoctorId || raw.doctorId || raw.doctorUid, ''),
+    assignedDoctorName: readText(raw.assignedDoctorName || raw.primaryDoctorName || raw.doctorName || raw.assignedDoctor, ''),
+    assignedDoctorFacility: readText(raw.assignedDoctorFacility || raw.primaryDoctorFacility || raw.doctorFacility, ''),
+    doctorSwitchStatus: readText(raw.doctorSwitchStatus || raw.switchStatus, ''),
+    doctorSwitchRequestedAt: raw.doctorSwitchRequestedAt || raw.switchRequestedAt,
+    children: Array.isArray(raw.children) ? (raw.children as ChildProfile[]) : undefined,
+    createdAt: raw.createdAt,
+  };
+}
 
 // ── REUSABLE COMPONENTS ───────────────────────
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -124,6 +183,141 @@ export default function ProfileScreen({ email, onBack }: Props) {
   const [assignedDoctorFacility,setAssignedDoctorFacility]= useState('');
   const [requestLoading,        setRequestLoading]        = useState(false);
   const [requestInfo,           setRequestInfo]           = useState<string | null>(null);
+  const [motherDocId,           setMotherDocId]           = useState('');
+
+  async function enrichAssignedDoctorDetails(input: MotherProfile): Promise<MotherProfile> {
+    let assignedDoctorId = readText(input.assignedDoctorId, '');
+    let assignedDoctorName = readText(input.assignedDoctorName, '');
+    let assignedDoctorFacility = readText(input.assignedDoctorFacility, '');
+
+    if (!assignedDoctorId || !assignedDoctorName || !assignedDoctorFacility) {
+      const normalizedMotherEmail = readText(input.email || email || auth.currentUser?.email, '').toLowerCase();
+      const doctorCollections = ['doctors', 'Doctors'];
+
+      const hydrateFromDoctorDoc = (docId: string, doctorData: Record<string, unknown>) => {
+        const firstName = readText(doctorData.firstName || doctorData.first_name, '');
+        const lastName = readText(doctorData.lastName || doctorData.last_name, '');
+        const combined = `${firstName} ${lastName}`.trim();
+
+        assignedDoctorId = assignedDoctorId || docId;
+        assignedDoctorName =
+          assignedDoctorName ||
+          readText(doctorData.fullName || doctorData.name || doctorData.displayName || doctorData.doctorName, combined);
+        assignedDoctorFacility =
+          assignedDoctorFacility ||
+          readText(doctorData.facility || doctorData.preferredFacility || doctorData.hospital || doctorData.clinic, '');
+      };
+
+      for (const collectionName of doctorCollections) {
+        let foundFromAssignedLink = false;
+
+        if (normalizedMotherEmail) {
+          try {
+            const byAssignedEmail = await getDocs(
+              query(collection(db, collectionName), where('assignedMotherEmail', '==', normalizedMotherEmail), limit(1))
+            );
+            if (!byAssignedEmail.empty) {
+              hydrateFromDoctorDoc(byAssignedEmail.docs[0].id, byAssignedEmail.docs[0].data() as Record<string, unknown>);
+              foundFromAssignedLink = true;
+            }
+          } catch {
+            // Continue with other doctor linkage checks.
+          }
+        }
+
+        if (!foundFromAssignedLink && motherId) {
+          try {
+            const byAssignedMotherId = await getDocs(
+              query(collection(db, collectionName), where('assignedMotherId', '==', motherId), limit(1))
+            );
+            if (!byAssignedMotherId.empty) {
+              hydrateFromDoctorDoc(byAssignedMotherId.docs[0].id, byAssignedMotherId.docs[0].data() as Record<string, unknown>);
+              foundFromAssignedLink = true;
+            }
+          } catch {
+            // Continue with other fallback checks.
+          }
+        }
+
+        if (!foundFromAssignedLink && normalizedMotherEmail) {
+          try {
+            const byAssignedEmailArray = await getDocs(
+              query(collection(db, collectionName), where('assignedMotherEmails', 'array-contains', normalizedMotherEmail), limit(1))
+            );
+            if (!byAssignedEmailArray.empty) {
+              hydrateFromDoctorDoc(byAssignedEmailArray.docs[0].id, byAssignedEmailArray.docs[0].data() as Record<string, unknown>);
+              foundFromAssignedLink = true;
+            }
+          } catch {
+            // Continue with other fallback checks.
+          }
+        }
+
+        if (!foundFromAssignedLink && motherId) {
+          try {
+            const byAssignedIdArray = await getDocs(
+              query(collection(db, collectionName), where('assignedMotherIds', 'array-contains', motherId), limit(1))
+            );
+            if (!byAssignedIdArray.empty) {
+              hydrateFromDoctorDoc(byAssignedIdArray.docs[0].id, byAssignedIdArray.docs[0].data() as Record<string, unknown>);
+              foundFromAssignedLink = true;
+            }
+          } catch {
+            // Continue with other fallback checks.
+          }
+        }
+
+        if (foundFromAssignedLink) break;
+      }
+    }
+
+    if (assignedDoctorId) {
+      const doctorCollections = ['doctors', 'Doctors'];
+      for (const collectionName of doctorCollections) {
+        try {
+          const doctorSnap = await getDoc(doc(db, collectionName, assignedDoctorId));
+          if (!doctorSnap.exists()) continue;
+
+          const doctorData = doctorSnap.data() as Record<string, unknown>;
+          const firstName = readText(doctorData.firstName || doctorData.first_name, '');
+          const lastName = readText(doctorData.lastName || doctorData.last_name, '');
+          const combined = `${firstName} ${lastName}`.trim();
+
+          assignedDoctorName = readText(
+            doctorData.fullName || doctorData.name || doctorData.displayName || doctorData.doctorName,
+            assignedDoctorName || combined
+          );
+          assignedDoctorFacility = readText(
+            doctorData.facility || doctorData.preferredFacility || doctorData.hospital || doctorData.clinic,
+            assignedDoctorFacility
+          );
+          break;
+        } catch {
+          // Continue checking alternative collection names.
+        }
+      }
+    }
+
+    if ((!assignedDoctorId || !assignedDoctorName || !assignedDoctorFacility) && input.facility.trim()) {
+      try {
+        const matched = await assignDoctorForFacility(input.facility.trim(), assignedDoctorId);
+        if (matched) {
+          assignedDoctorId = assignedDoctorId || matched.doctorId;
+          assignedDoctorName = assignedDoctorName || matched.doctorName;
+          assignedDoctorFacility = assignedDoctorFacility || matched.facility;
+        }
+      } catch {
+        // Keep existing values if matching fails.
+      }
+    }
+
+    return {
+      ...input,
+      assignedDoctorId,
+      assignedDoctorName,
+      assignedDoctorFacility,
+    };
+  }
 
   // ── READ ──────────────────────────────────
   useEffect(() => {
@@ -132,59 +326,89 @@ export default function ProfileScreen({ email, onBack }: Props) {
       try {
         let data: MotherProfile | null = null;
 
-        const uidCandidates = [doc(db, 'mothers', motherId), doc(db, 'Mothers', motherId)];
-        for (const ref of uidCandidates) {
-          const snap = await getDoc(ref);
-          if (!snap.exists()) continue;
-          data = snap.data() as MotherProfile;
-          break;
-        }
+        const normalizedEmail = normalizeEmail(email || auth.currentUser?.email || '');
+        const emailDocId = normalizedEmail ? getMotherDocIdFromEmail(normalizedEmail) : '';
+        let resolvedMotherDocId = '';
 
-        if (!data) {
-          const normalizedEmail = (email || auth.currentUser?.email || '').trim().toLowerCase();
-          if (normalizedEmail) {
-            const collectionNames = ['mothers', 'Mothers'];
-            const emailFields = ['email', 'Email', 'userEmail', 'user_email', 'motherEmail', 'mother_email'];
+        const emailFields = ['email', 'Email', 'userEmail', 'user_email', 'motherEmail', 'mother_email'];
+        const matchedByEmail = new Map<string, MotherProfile>();
 
-            for (const collectionName of collectionNames) {
-              let found = false;
-              for (const emailField of emailFields) {
-                try {
-                  const snap = await getDocs(
-                    query(collection(db, collectionName), where(emailField, '==', normalizedEmail), limit(1))
-                  );
-                  if (snap.empty) continue;
-                  data = snap.docs[0].data() as MotherProfile;
-                  found = true;
-                  break;
-                } catch {
-                  // Continue checking other fields.
-                }
-              }
-              if (found) break;
+        if (normalizedEmail) {
+          for (const emailField of emailFields) {
+            try {
+              const snap = await getDocs(
+                query(collection(db, 'mothers'), where(emailField, '==', normalizedEmail), limit(20))
+              );
+              snap.docs.forEach((item) => {
+                matchedByEmail.set(item.id, normalizeProfileRecord(item.data() as Record<string, unknown>));
+              });
+            } catch {
+              // Continue checking other email fields.
             }
           }
         }
 
+        if (matchedByEmail.size > 0) {
+          const entries = Array.from(matchedByEmail.entries());
+          const preferredId =
+            (emailDocId && matchedByEmail.has(emailDocId) ? emailDocId : '') ||
+            (motherId && matchedByEmail.has(motherId) ? motherId : '') ||
+            entries[0][0];
+
+          const best = entries
+            .map(([id, value]) => ({ id, value, score: profileScore(value) }))
+            .sort((a, b) => b.score - a.score)[0];
+
+          data = best.value;
+          resolvedMotherDocId = preferredId;
+
+          await setDoc(
+            doc(db, 'mothers', preferredId),
+            {
+              ...best.value,
+              email: normalizeEmail(best.value.email || normalizedEmail),
+              createdAt: best.value.createdAt || serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          const duplicateIds = entries.map(([id]) => id).filter((id) => id !== preferredId);
+          if (duplicateIds.length > 0) {
+            await Promise.all(duplicateIds.map((id) => deleteDoc(doc(db, 'mothers', id))));
+          }
+        } else if (motherId) {
+          const uidSnap = await getDoc(doc(db, 'mothers', motherId));
+          if (uidSnap.exists()) {
+            data = normalizeProfileRecord(uidSnap.data() as Record<string, unknown>);
+            resolvedMotherDocId = uidSnap.id;
+          }
+        }
+
         if (data) {
-          if (motherId) {
+          const enriched = await enrichAssignedDoctorDetails(data);
+
+          const targetDocId = resolvedMotherDocId || motherId || emailDocId;
+          if (targetDocId) {
             await setDoc(
-              doc(db, 'mothers', motherId),
+              doc(db, 'mothers', targetDocId),
               {
-                ...data,
-                createdAt: data.createdAt || serverTimestamp(),
+                ...enriched,
+                email: normalizeEmail(enriched.email || normalizedEmail),
+                createdAt: enriched.createdAt || serverTimestamp(),
                 updatedAt: serverTimestamp(),
               },
               { merge: true }
             );
           }
 
-          if (!data.createdAt) {
-            data.createdAt = new Date().toISOString();
+          if (!enriched.createdAt) {
+            enriched.createdAt = new Date().toISOString();
           }
 
-          setProfile(data);
-          syncToState(data);
+          setMotherDocId(targetDocId);
+          setProfile(enriched);
+          syncToState(enriched);
         }
       } catch (e) {
         setError('Could not load profile from database.');
@@ -250,16 +474,17 @@ export default function ProfileScreen({ email, onBack }: Props) {
         assignedDoctorName:    doctorMatch?.doctorName || '',
         assignedDoctorFacility:doctorMatch?.facility || '',
       };
-      await updateDoc(doc(db, 'mothers', motherId), {
+      const targetMotherDocId = motherDocId || motherId || getMotherDocIdFromEmail(profile?.email || email || '');
+      await setDoc(doc(db, 'mothers', targetMotherDocId), {
         ...updated,
         ...(profile?.createdAt ? {} : { createdAt: serverTimestamp() }),
         updatedAt: serverTimestamp(),
-      });
+      }, { merge: true });
 
       if (doctorMatch) {
         if (!hasExistingAssignedDoctor) {
           await reserveDoctorForMother(doctorMatch, {
-            motherId,
+            motherId: targetMotherDocId,
             motherEmail: profile?.email || email,
             motherCode: profile?.motherCode || '',
           });
@@ -292,7 +517,7 @@ export default function ProfileScreen({ email, onBack }: Props) {
 
   const confirmDelete = async () => {
     try {
-      await deleteDoc(doc(db, 'mothers', motherId));
+      await deleteMotherAccountByEmail(profile?.email || email || '');
       await auth.currentUser?.delete();
     } catch (e) {
       Alert.alert('Error', 'Could not delete account. Please sign in again and retry.');
@@ -339,14 +564,15 @@ export default function ProfileScreen({ email, onBack }: Props) {
         requestedAt: new Date().toISOString(),
       });
 
-      await updateDoc(doc(db, 'mothers', motherId), {
+      const targetMotherDocId = motherDocId || motherId || getMotherDocIdFromEmail(profile?.email || email || '');
+      await setDoc(doc(db, 'mothers', targetMotherDocId), {
         doctorSwitchStatus: 'PENDING',
         doctorSwitchRequestedAt: serverTimestamp(),
         pendingDoctorId: requestedDoctor.doctorId,
         pendingDoctorName: requestedDoctor.doctorName,
         pendingDoctorFacility: requestedDoctor.facility,
         updatedAt: serverTimestamp(),
-      });
+      }, { merge: true });
 
       setProfile((prev) =>
         prev
@@ -368,6 +594,13 @@ export default function ProfileScreen({ email, onBack }: Props) {
 
   const initials = (name: string) =>
     name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2) || '?';
+
+  const formatDoctorName = (value: string) => {
+    const name = (value || '').trim();
+    if (!name) return '';
+    if (/^dr\.?\s/i.test(name)) return name;
+    return `Dr. ${name}`;
+  };
 
   const formatDate = (ts: any) => {
     if (!ts) return '—';
@@ -444,8 +677,8 @@ export default function ProfileScreen({ email, onBack }: Props) {
                 </View>
               ) : null}
               <InfoRow label="Mother Code"  value={profile.motherCode  ?? ''} />
-              <InfoRow label="Assigned Doctor" value={profile.assignedDoctorName ?? assignedDoctorName} />
-              <InfoRow label="Doctor Facility" value={profile.assignedDoctorFacility ?? assignedDoctorFacility} />
+              <InfoRow label="Assigned Doctor" value={formatDoctorName(profile.assignedDoctorName || assignedDoctorName || '')} />
+              <InfoRow label="Doctor Facility" value={profile.assignedDoctorFacility || assignedDoctorFacility || ''} />
               <InfoRow label="Full Name"    value={profile.fullName    ?? ''} />
               <InfoRow label="Email"        value={profile.email       ?? email} />
               <InfoRow label="Phone"        value={profile.phone       ?? ''} />
@@ -515,7 +748,7 @@ export default function ProfileScreen({ email, onBack }: Props) {
             </View>
 
             <FieldInput label="Mother Code" value={profile.motherCode ?? ''} onChange={() => {}} locked />
-            <FieldInput label="Assigned Doctor" value={assignedDoctorName || profile.assignedDoctorName || ''} onChange={() => {}} locked />
+            <FieldInput label="Assigned Doctor" value={formatDoctorName(assignedDoctorName || profile.assignedDoctorName || '')} onChange={() => {}} locked />
             <FieldInput label="Doctor Facility" value={assignedDoctorFacility || profile.assignedDoctorFacility || ''} onChange={() => {}} locked />
             <FieldInput label="Full Name"   value={fullName}  onChange={setFullName} />
             <FieldInput label="Email"       value={profile.email ?? email} onChange={() => {}} locked />

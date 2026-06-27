@@ -6,6 +6,7 @@ import {
   getDocs,
   limit,
   query,
+  updateDoc,
   where,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
@@ -35,7 +36,8 @@ export interface MobileVaccine {
   name: string;
   scheduled: string;
   administered: string | null;
-  status: 'COMPLETED' | 'PENDING';
+  status: 'COMPLETED' | 'PENDING' | 'MISSED';
+  scheduleKey?: string;
 }
 
 export interface MobileChildProfile {
@@ -43,6 +45,7 @@ export interface MobileChildProfile {
   childCode: string;
   childName: string;
   childBirth: string;
+  childBirthIso?: string;
   order: number;
 }
 
@@ -102,6 +105,15 @@ export interface MobileGrowthPoint {
   headCircumference: string;
 }
 
+export interface MobileMotherGrowthPoint {
+  id: string;
+  date: string;
+  weight: string;
+  bp: string;
+  hr: string;
+  notes: string;
+}
+
 export interface MobileTimelineItem {
   id: string;
   date: string;
@@ -137,6 +149,22 @@ interface AutoAppointmentPlanItem {
   appointmentTime: string;
 }
 
+interface ImmunizationAppointmentTemplate {
+  id: string;
+  label: string;
+  dueWeeks: number;
+  keywords: string[];
+}
+
+const IMMUNIZATION_APPOINTMENT_TEMPLATES: ImmunizationAppointmentTemplate[] = [
+  { id: 'bcg-opv0', label: 'BCG + OPV 0', dueWeeks: 0, keywords: ['bcg', 'opv 0', 'opv0'] },
+  { id: '6w', label: 'Pentavalent 1 + PCV 1 + OPV 1 + Rota 1', dueWeeks: 6, keywords: ['penta 1', 'pentavalent 1', 'pcv 1', 'opv 1', 'rota 1'] },
+  { id: '10w', label: 'Pentavalent 2 + PCV 2 + OPV 2 + Rota 2', dueWeeks: 10, keywords: ['penta 2', 'pentavalent 2', 'pcv 2', 'opv 2', 'rota 2'] },
+  { id: '14w', label: 'Pentavalent 3 + PCV 3 + OPV 3 + IPV', dueWeeks: 14, keywords: ['penta 3', 'pentavalent 3', 'pcv 3', 'opv 3', 'ipv'] },
+  { id: '9m', label: 'Measles-Rubella 1 + Yellow Fever', dueWeeks: 39, keywords: ['measles', 'rubella', 'mr 1', 'yellow fever'] },
+  { id: '18m', label: 'Measles-Rubella 2', dueWeeks: 78, keywords: ['mr 2', 'measles-rubella 2', 'measles rubella 2'] },
+];
+
 function readText(value: unknown, fallback = ''): string {
   if (typeof value === 'string' && value.trim()) return value.trim();
   if (typeof value === 'number') return String(value);
@@ -159,6 +187,24 @@ function readDate(value: unknown, fallback = 'Not set'): string {
   }
 
   return fallback;
+}
+
+function toIsoDate(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+    return '';
+  }
+
+  if (value && typeof value === 'object' && 'toDate' in (value as Record<string, unknown>)) {
+    try {
+      return (value as { toDate: () => Date }).toDate().toISOString();
+    } catch {
+      return '';
+    }
+  }
+
+  return '';
 }
 
 function toDisplayDate(value: unknown, fallback = 'Date not set'): string {
@@ -222,6 +268,15 @@ function readBoolean(value: unknown, fallback = false): boolean {
   return fallback;
 }
 
+function normalizeStageValue(value: unknown): 'PRENATAL' | 'POSTNATAL' {
+  const raw = readText(value, '').toUpperCase();
+  return raw.includes('POST') ? 'POSTNATAL' : 'PRENATAL';
+}
+
+function getEmailDocId(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]/gi, '_');
+}
+
 function toDateValue(input: string): Date | null {
   if (!input.trim()) return null;
   const parsed = new Date(input);
@@ -239,6 +294,24 @@ function uniqueById<T extends { id: string }>(rows: T[]): T[] {
 
 function normalizeText(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function addWeeks(base: Date, weeks: number): Date {
+  const date = new Date(base.getTime());
+  date.setDate(date.getDate() + weeks * 7);
+  return date;
+}
+
+function parseDateLoose(value: string): Date | null {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+function startOfDay(date: Date): Date {
+  const copy = new Date(date.getTime());
+  copy.setHours(0, 0, 0, 0);
+  return copy;
 }
 
 function normalizeFacilityKey(value: string): string {
@@ -445,17 +518,90 @@ function readDoctorFacilityCandidates(data: Record<string, unknown>): string[] {
 async function findByEmail(
   collectionNames: string[],
   email: string,
-  fields: string[] = ['email', 'Email', 'userEmail', 'user_email']
+  fields: string[] = ['email', 'Email', 'userEmail', 'user_email', 'motherEmail', 'mother_email', 'patientEmail']
 ): Promise<QueryDocumentSnapshot | null> {
+  const normalizedEmail = email.trim().toLowerCase();
+
   for (const collectionName of collectionNames) {
+    if (normalizedEmail) {
+      try {
+        const directDoc = await getDoc(doc(firebaseDb, collectionName, getEmailDocId(normalizedEmail)));
+        if (directDoc.exists()) return directDoc as QueryDocumentSnapshot;
+      } catch {
+        // Fall back to field-based queries.
+      }
+    }
+
     for (const field of fields) {
       const snapshot = await getDocs(
-        query(collection(firebaseDb, collectionName), where(field, '==', email), limit(1))
+        query(collection(firebaseDb, collectionName), where(field, '==', normalizedEmail), limit(1))
       );
       if (!snapshot.empty) return snapshot.docs[0];
     }
   }
   return null;
+}
+
+async function buildImmunizationAppointments(email: string): Promise<MobileAppointment[]> {
+  const [children, profile] = await Promise.all([
+    fetchChildrenProfiles(email),
+    fetchMotherProfileDetails(email),
+  ]);
+
+  if (children.length === 0) return [];
+
+  const now = startOfDay(new Date());
+  const resolvedDoctor = profile ? await resolveDoctorForAutoAppointments(profile) : null;
+  const doctorLabel =
+    readText(resolvedDoctor?.doctorName, '') ||
+    readText(profile?.assignedDoctorName, '') ||
+    'Clinician not assigned';
+  const rows: MobileAppointment[] = [];
+
+  for (const child of children) {
+    const birthDate = parseDateLoose(child.childBirthIso || child.childBirth || '');
+    if (!birthDate) continue;
+
+    const immunizationData = await fetchImmunizationData(email, child.id);
+
+    const childVaccines = immunizationData.vaccines;
+
+    const normalizedChildVaccines = childVaccines.map((item) => ({
+      ...item,
+      normalizedName: normalizeText(item.name),
+      normalizedKey: normalizeText(item.scheduleKey || ''),
+    }));
+
+    IMMUNIZATION_APPOINTMENT_TEMPLATES.forEach((template) => {
+      const dueDate = addWeeks(birthDate, template.dueWeeks);
+      const matchedRecord = normalizedChildVaccines.find((record) =>
+        record.normalizedKey === normalizeText(template.id)
+      ) || normalizedChildVaccines.find((record) =>
+        template.keywords.some((keyword) => record.normalizedName.includes(normalizeText(keyword)))
+      );
+
+      const status: string =
+        matchedRecord?.status === 'COMPLETED'
+          ? 'COMPLETED'
+          : matchedRecord?.status === 'MISSED'
+            ? 'MISSED'
+            : dueDate < now
+              ? 'MISSED'
+              : 'PENDING';
+
+      rows.push({
+        id: `IMMUNIZATION-${child.id}-${template.id}`,
+        date: toDisplayDate(dueDate.toISOString()),
+        time: '09:00',
+        doctor: doctorLabel,
+        reason: `Child immunization: ${template.label} (${child.childName})`,
+        status,
+        stage: 'POSTNATAL',
+      });
+    });
+  }
+
+  return rows;
 }
 
 export async function fetchAppointments(email: string): Promise<MobileAppointment[]> {
@@ -465,35 +611,86 @@ export async function fetchAppointments(email: string): Promise<MobileAppointmen
     // Loading appointments should continue even if auto-generation fails.
   }
 
+  const motherProfile = await fetchMotherProfileDetails(email);
+  let resolvedDoctorName = readText(motherProfile?.assignedDoctorName, '');
+
+  if (motherProfile) {
+    try {
+      const resolvedDoctor = await resolveDoctorForAutoAppointments(motherProfile);
+      resolvedDoctorName = readText(resolvedDoctor.doctorName, resolvedDoctorName);
+    } catch {
+      // Keep profile-level assigned doctor fallback.
+    }
+  }
+
   const collectionNames = ['appointments', 'Appointments'];
   const emailFields = ['motherEmail', 'email', 'userEmail', 'patientEmail'];
+  let baseAppointments: MobileAppointment[] = [];
 
   for (const name of collectionNames) {
     for (const field of emailFields) {
       const snapshot = await getDocs(query(collection(firebaseDb, name), where(field, '==', email)));
       if (snapshot.empty) continue;
 
-      return snapshot.docs.map((item) => {
+      baseAppointments = snapshot.docs.map((item) => {
         const data = item.data();
         const dateTimeSource = data.dateTime || data.appointmentDate || data.date || data.scheduledAt;
         const rawStage = readText(data.stage || data.appointmentStage || data.careStage || data.targetStage, '').toUpperCase();
         const stage: 'PRENATAL' | 'POSTNATAL' | 'ALL' | undefined =
           rawStage === 'PRENATAL' || rawStage === 'POSTNATAL' || rawStage === 'ALL' ? rawStage : undefined;
 
+        const doctorText = readText(
+          data.doctorName ||
+            data.primaryDoctorName ||
+            data.assignedDoctorName ||
+            data.provider ||
+            data.doctor,
+          ''
+        );
+
+        const normalizedDoctor = normalizeText(doctorText);
+        const shouldUseResolvedDoctor =
+          !doctorText ||
+          normalizedDoctor === 'clinician not assigned' ||
+          normalizedDoctor === 'immunization clinic' ||
+          normalizedDoctor === 'doctor';
+
+        const providerName = shouldUseResolvedDoctor
+          ? readText(resolvedDoctorName, doctorText || 'Clinician not assigned')
+          : doctorText;
+
         return {
           id: item.id,
           date: toDisplayDate(dateTimeSource),
           time: toDisplayTime(data.time || data.appointmentTime || data.slot, dateTimeSource),
-          doctor: readText(data.doctorName || data.provider || data.doctor, 'Clinician not assigned'),
+          doctor: providerName,
           reason: cleanAppointmentReason(readText(data.reason || data.purpose || data.type, 'General consultation')),
           status: readText(data.status, 'PENDING').toUpperCase(),
           stage,
         };
       });
+
+      break;
     }
+
+    if (baseAppointments.length > 0) break;
   }
 
-  return [];
+  let immunizationAppointments: MobileAppointment[] = [];
+  try {
+    immunizationAppointments = await buildImmunizationAppointments(email);
+  } catch {
+    immunizationAppointments = [];
+  }
+
+  const merged = [...baseAppointments, ...immunizationAppointments];
+  const dedupedById = uniqueById(merged);
+
+  return dedupedById.sort((a, b) => {
+    const aDate = parseDateLoose(a.date)?.getTime() || 0;
+    const bDate = parseDateLoose(b.date)?.getTime() || 0;
+    return aDate - bDate;
+  });
 }
 
 export async function requestEmergencyAppointment(
@@ -556,7 +753,7 @@ export async function requestEmergencyAppointment(
 }
 
 export async function fetchRecords(email: string): Promise<MobileRecord[]> {
-  const collectionNames = ['maternalRecords', 'anc_records', 'ancRecords', 'records'];
+  const collectionNames = ['pncRecords', 'maternalRecords', 'anc_records', 'ancRecords', 'records'];
   const emailFields = ['motherEmail', 'email', 'userEmail', 'patientEmail'];
 
   const mapRecord = (item: QueryDocumentSnapshot): MobileRecord => {
@@ -592,7 +789,7 @@ export async function fetchRecords(email: string): Promise<MobileRecord[]> {
   const motherProfile = await fetchMotherProfileDetails(email);
   if (motherProfile?.id) {
     const idFields = ['motherId', 'mother_id'];
-    const idCollectionNames = ['maternalRecords', 'anc_records', 'ancRecords', 'records'];
+    const idCollectionNames = ['pncRecords', 'maternalRecords', 'anc_records', 'ancRecords', 'records'];
 
     for (const name of idCollectionNames) {
       for (const field of idFields) {
@@ -637,13 +834,16 @@ export async function fetchImmunizationData(
 
       for (const item of snap.docs) {
         const data = item.data();
-        const status = readText(data.status, 'PENDING').toUpperCase() === 'COMPLETED' ? 'COMPLETED' : 'PENDING';
+        const rawStatus = readText(data.status, 'PENDING').toUpperCase();
+        const status: 'COMPLETED' | 'PENDING' | 'MISSED' =
+          rawStatus === 'COMPLETED' ? 'COMPLETED' : rawStatus === 'MISSED' ? 'MISSED' : 'PENDING';
         vaccines.push({
           id: item.id,
           name: readText(data.name || data.vaccineName || data.title, 'Vaccine'),
           scheduled: readDate(data.scheduledDate || data.scheduled_for || data.schedule, 'Schedule not set'),
           administered: readDate(data.administeredDate || data.givenOn || data.completedAt, '' ) || null,
           status,
+          scheduleKey: readText(data.scheduleKey || data.schedule_id || data.vaccineKey, ''),
         });
       }
     }
@@ -652,6 +852,72 @@ export async function fetchImmunizationData(
   }
 
   return { children, selectedChildId: selectedChild.id, vaccines: uniqueById(vaccines) };
+}
+
+export async function saveHistoricalImmunizationStatus(payload: {
+  email: string;
+  childId: string;
+  childCode?: string;
+  scheduleKey: string;
+  vaccineName: string;
+  ageLabel: string;
+  status: 'COMPLETED' | 'MISSED';
+}): Promise<void> {
+  const normalizedEmail = payload.email.trim().toLowerCase();
+  const childId = payload.childId.trim();
+  if (!normalizedEmail || !childId || !payload.scheduleKey.trim()) return;
+
+  const targetCollection = 'immunizations';
+  const baseUpdate: Record<string, unknown> = {
+    motherEmail: normalizedEmail,
+    childId,
+    childCode: payload.childCode || '',
+    scheduleKey: payload.scheduleKey,
+    name: payload.vaccineName,
+    scheduled_for: payload.ageLabel,
+    status: payload.status,
+    source: 'MOTHER_SELF_REPORT',
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (payload.status === 'COMPLETED') {
+    baseUpdate.administeredDate = new Date().toISOString();
+  }
+
+  const byChildAndSchedule = await getDocs(
+    query(
+      collection(firebaseDb, targetCollection),
+      where('childId', '==', childId),
+      where('scheduleKey', '==', payload.scheduleKey),
+      limit(1)
+    )
+  );
+
+  if (!byChildAndSchedule.empty) {
+    await updateDoc(doc(firebaseDb, targetCollection, byChildAndSchedule.docs[0].id), baseUpdate);
+    return;
+  }
+
+  if (payload.childCode) {
+    const byCodeAndSchedule = await getDocs(
+      query(
+        collection(firebaseDb, targetCollection),
+        where('childCode', '==', payload.childCode),
+        where('scheduleKey', '==', payload.scheduleKey),
+        limit(1)
+      )
+    );
+
+    if (!byCodeAndSchedule.empty) {
+      await updateDoc(doc(firebaseDb, targetCollection, byCodeAndSchedule.docs[0].id), baseUpdate);
+      return;
+    }
+  }
+
+  await addDoc(collection(firebaseDb, targetCollection), {
+    ...baseUpdate,
+    createdAt: new Date().toISOString(),
+  });
 }
 
 export async function fetchWellnessTips(email: string): Promise<MobileTip[]> {
@@ -757,7 +1023,7 @@ export async function fetchMotherProfileDetails(email: string): Promise<MobileMo
     assignedDoctorFacility: readText(data.assignedDoctorFacility || data.doctorFacility, ''),
     emergencyContactName: readText(data.emergencyContactName || data.emergency_name, ''),
     emergencyContactPhone: readText(data.emergencyContactPhone || data.emergency_phone, ''),
-    stage: readText(data.stage || data.motherStage, 'PRENATAL').toUpperCase(),
+    stage: normalizeStageValue(data.stage || data.motherStage),
     pregnancyWeek: readText(data.pregnancyWeek || data.week || data.currentWeek, ''),
     babyAgeMonths: readText(data.babyAgeMonths || data.baby_months || data.infantAgeMonths, ''),
     childrenCount: children.length,
@@ -769,11 +1035,13 @@ function readChildrenFromMotherDoc(value: unknown): MobileChildProfile[] {
 
   return value.map((item, index) => {
     const data = item as Record<string, unknown>;
+    const rawBirth = data.birthDate || data.dob || data.dateOfBirth;
     return {
       id: readText(data.id || data.childId, `embedded-${index + 1}`),
       childCode: readText(data.childCode || data.code, `CH${index + 1}`),
       childName: readText(data.fullName || data.name || data.childName, `Child ${index + 1}`),
-      childBirth: readDate(data.birthDate || data.dob || data.dateOfBirth, 'Birth date not set'),
+      childBirth: readDate(rawBirth, 'Birth date not set'),
+      childBirthIso: toIsoDate(rawBirth),
       order: Number.isFinite(Number(data.order)) ? Number(data.order) : index + 1,
     } as MobileChildProfile;
   });
@@ -813,11 +1081,13 @@ export async function fetchChildrenProfiles(email: string): Promise<MobileChildP
 
       for (const docRow of snapshot.docs) {
         const data = docRow.data();
+        const rawBirth = data.birthDate || data.dob || data.dateOfBirth;
         rows.push({
           id: docRow.id,
           childCode: readText(data.childCode || data.code, docRow.id),
           childName: readText(data.fullName || data.name || data.childName, 'Child profile'),
-          childBirth: readDate(data.birthDate || data.dob || data.dateOfBirth, 'Birth date not set'),
+          childBirth: readDate(rawBirth, 'Birth date not set'),
+          childBirthIso: toIsoDate(rawBirth),
           order: Number.isFinite(Number(data.order)) ? Number(data.order) : rows.length + 1,
         });
       }
@@ -868,18 +1138,56 @@ export async function fetchMilestones(email: string): Promise<MobileMilestone[]>
 export async function fetchNotifications(email: string): Promise<MobileNotification[]> {
   const collectionNames = ['notifications', 'Notifications', 'alerts'];
   const notifications: MobileNotification[] = [];
+  const motherProfile = await fetchMotherProfileDetails(email);
+  const motherStage = normalizeStageValue(motherProfile?.stage || 'PRENATAL');
+
+  const normalizeStage = (value: unknown): 'PRENATAL' | 'POSTNATAL' | 'ALL' | '' => {
+    const raw = readText(value, '').toUpperCase();
+    if (!raw) return '';
+    if (raw === 'ALL') return 'ALL';
+    if (raw.includes('POST')) return 'POSTNATAL';
+    if (raw.includes('PRE') || raw.includes('ANTENATAL') || raw.includes('ANC')) return 'PRENATAL';
+    return '';
+  };
+
+  const inferStageFromNotification = (data: Record<string, unknown>): 'PRENATAL' | 'POSTNATAL' | 'ALL' | '' => {
+    const explicit = normalizeStage(data.stage || data.targetStage || data.careStage || data.phase);
+    if (explicit) return explicit;
+
+    const textBlob = [
+      readText(data.type, ''),
+      readText(data.category, ''),
+      readText(data.title, ''),
+      readText(data.subject, ''),
+      readText(data.message, ''),
+      readText(data.body, ''),
+      readText(data.content, ''),
+    ].join(' ').toLowerCase();
+
+    const postnatalHits = ['postnatal', 'post natal', 'pnc', 'baby', 'newborn', 'child', 'immunization', 'vaccine', 'growth'];
+    const prenatalHits = ['prenatal', 'pre natal', 'anc', 'pregnancy', 'antenatal', 'trimester', 'fetal'];
+
+    const hasPostnatal = postnatalHits.some((token) => textBlob.includes(token));
+    const hasPrenatal = prenatalHits.some((token) => textBlob.includes(token));
+
+    if (hasPostnatal && !hasPrenatal) return 'POSTNATAL';
+    if (hasPrenatal && !hasPostnatal) return 'PRENATAL';
+    return '';
+  };
 
   for (const name of collectionNames) {
     const snapshot = await getDocs(collection(firebaseDb, name));
     if (snapshot.empty) continue;
 
     for (const item of snapshot.docs) {
-      const data = item.data();
+      const data = item.data() as Record<string, unknown>;
       const audience = readText(data.audience || data.role || data.target || 'MOTHER').toUpperCase();
       const emailMatch = readText(data.email || data.userEmail || data.motherEmail).toLowerCase();
       const isForMother = audience === 'MOTHER' || audience === 'ALL' || !audience;
       const belongsToMother = emailMatch ? emailMatch === email : true;
-      if (!isForMother || !belongsToMother) continue;
+      const targetStage = inferStageFromNotification(data);
+      const stageMatches = !targetStage || targetStage === 'ALL' || targetStage === motherStage;
+      if (!isForMother || !belongsToMother || !stageMatches) continue;
 
       notifications.push({
         id: item.id,
@@ -1045,7 +1353,7 @@ export async function fetchGrowthMonitoring(email: string, childId?: string): Pr
   const children = await fetchChildrenProfiles(email);
   const selectedChild = children.find((item) => item.id === childId) || children[0] || null;
 
-  const collectionNames = ['growth_monitoring', 'growthMonitoring', 'child_growth'];
+  const collectionNames = ['child_growth', 'growth_monitoring', 'growthMonitoring', 'growthRecords'];
 
   for (const name of collectionNames) {
     const queries = [
@@ -1076,7 +1384,7 @@ export async function fetchGrowthMonitoring(email: string, childId?: string): Pr
         return {
           id: item.id,
           childId: readText(data.childId || data.child_id || data.childCode || data.child_code, ''),
-          date: readDate(data.date || data.recordedAt || data.createdAt),
+          date: readDate(data.checkupDate || data.date || data.recordedAt || data.createdAt),
           weight: readText(data.weight || data.weightKg || data.childWeight, 'Not recorded'),
           height: readText(data.height || data.length || data.childHeight, 'Not recorded'),
           headCircumference: readText(data.headCircumference || data.hc || data.head_size, 'Not recorded'),
@@ -1086,6 +1394,78 @@ export async function fetchGrowthMonitoring(email: string, childId?: string): Pr
   }
 
   return [];
+}
+
+export async function fetchMotherGrowthMonitoring(email: string): Promise<MobileMotherGrowthPoint[]> {
+  const motherDoc = await findByEmail(['mothers', 'Mothers'], email);
+  const motherId = motherDoc?.id || null;
+  const collectionNames = ['pncRecords', 'maternalRecords', 'anc_records', 'ancRecords', 'records'];
+  const emailFields = ['motherEmail', 'email', 'userEmail', 'patientEmail'];
+  const rows: MobileMotherGrowthPoint[] = [];
+
+  const isPostnatalRecord = (data: Record<string, unknown>): boolean => {
+    const type = readText(data.visitType || data.recordType || data.type || data.stage || data.careStage, '').toUpperCase();
+    const notes = readText(data.notes || data.clinicalObservations || data.observations || data.remarks, '').toUpperCase();
+    return (
+      type === 'PNC' ||
+      type.includes('POSTNATAL') ||
+      type.includes('POST_NATAL') ||
+      notes.includes('[PNC]')
+    );
+  };
+
+  for (const name of collectionNames) {
+    if (motherId) {
+      const idQueries = [
+        query(collection(firebaseDb, name), where('motherId', '==', motherId)),
+        query(collection(firebaseDb, name), where('mother_id', '==', motherId)),
+      ];
+
+      for (const idQuery of idQueries) {
+        const snapshot = await getDocs(idQuery);
+        if (snapshot.empty) continue;
+
+        snapshot.docs.forEach((item) => {
+          const data = item.data() as Record<string, unknown>;
+          if (!isPostnatalRecord(data)) return;
+
+          rows.push({
+            id: item.id,
+            date: toDisplayDate(data.checkupDate || data.date || data.visitDate || data.createdAt),
+            weight: readText(data.weight || data.weightKg || data.motherWeight, 'Not recorded'),
+            bp: readText(data.bp || data.bloodPressure || data.blood_pressure, 'Not recorded'),
+            hr: readText(data.hr || data.pulse || data.heartRate, 'Not recorded'),
+            notes: readText(data.notes || data.clinicalObservations || data.observations || data.remarks, 'No notes.'),
+          });
+        });
+      }
+    }
+
+    for (const field of emailFields) {
+      const snapshot = await getDocs(query(collection(firebaseDb, name), where(field, '==', email)));
+      if (snapshot.empty) continue;
+
+      snapshot.docs.forEach((item) => {
+        const data = item.data() as Record<string, unknown>;
+        if (!isPostnatalRecord(data)) return;
+
+        rows.push({
+          id: item.id,
+          date: toDisplayDate(data.checkupDate || data.date || data.visitDate || data.createdAt),
+          weight: readText(data.weight || data.weightKg || data.motherWeight, 'Not recorded'),
+          bp: readText(data.bp || data.bloodPressure || data.blood_pressure, 'Not recorded'),
+          hr: readText(data.hr || data.pulse || data.heartRate, 'Not recorded'),
+          notes: readText(data.notes || data.clinicalObservations || data.observations || data.remarks, 'No notes.'),
+        });
+      });
+    }
+  }
+
+  return uniqueById(rows).sort((a, b) => {
+    const aDate = parseDateLoose(a.date)?.getTime() || 0;
+    const bDate = parseDateLoose(b.date)?.getTime() || 0;
+    return aDate - bDate;
+  });
 }
 
 export async function fetchTimeline(email: string): Promise<MobileTimelineItem[]> {

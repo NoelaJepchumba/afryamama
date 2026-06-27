@@ -17,6 +17,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   query,
   updateDoc,
   addDoc,
@@ -44,6 +45,19 @@ function normalizeStatus(value: unknown): MilestoneStatus {
   const status = String(value || '').trim().toLowerCase();
   if (status === 'achieved' || status === 'concern') return status;
   return 'pending';
+}
+
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function getMotherDocIdFromEmail(value: string): string {
+  return normalizeEmail(value).replace(/[^a-z0-9]/gi, '_');
+}
+
+function normalizeStageValue(value: unknown): Stage {
+  const raw = String(value || '').trim().toUpperCase();
+  return raw.includes('POST') ? 'POSTNATAL' : 'PRENATAL';
 }
 
 function parsePrenatalWeekTarget(label: string): number | null {
@@ -159,10 +173,36 @@ export default function MilestonesScreen({ onBack }: Props) {
     else           setLoading(true);
 
     try {
-      // Get mother stage from profile
-      const profSnap = await getDoc(doc(db, 'mothers', motherId));
-      const profStage: Stage = profSnap.exists() && profSnap.data().stage === 'POSTNATAL' ? 'POSTNATAL' : 'PRENATAL';
-      const profileData = (profSnap.data() || {}) as Record<string, unknown>;
+      // Resolve mother profile robustly so stage is correct even with canonical email-based doc ids.
+      const normalizedEmail = normalizeEmail(auth.currentUser?.email || '');
+      const emailDocId = normalizedEmail ? getMotherDocIdFromEmail(normalizedEmail) : '';
+      let profileData: Record<string, unknown> = {};
+
+      const uidProfileSnap = motherId ? await getDoc(doc(db, 'mothers', motherId)) : null;
+      if (uidProfileSnap?.exists()) {
+        profileData = uidProfileSnap.data() as Record<string, unknown>;
+      } else if (emailDocId) {
+        const emailProfileSnap = await getDoc(doc(db, 'mothers', emailDocId));
+        if (emailProfileSnap.exists()) {
+          profileData = emailProfileSnap.data() as Record<string, unknown>;
+        } else if (normalizedEmail) {
+          const emailFields = ['email', 'Email', 'userEmail', 'user_email', 'motherEmail', 'mother_email'];
+          for (const emailField of emailFields) {
+            try {
+              const byEmailSnap = await getDocs(
+                query(collection(db, 'mothers'), where(emailField, '==', normalizedEmail), limit(1))
+              );
+              if (byEmailSnap.empty) continue;
+              profileData = byEmailSnap.docs[0].data() as Record<string, unknown>;
+              break;
+            } catch {
+              // Continue checking other email field variants.
+            }
+          }
+        }
+      }
+
+      const profStage: Stage = normalizeStageValue(profileData.stage || profileData.motherStage);
       const weekParsed = Number.parseInt(String(profileData.pregnancyWeek || profileData.week || ''), 10);
       const babyMonthsParsed = Number.parseInt(String(profileData.babyAgeMonths || profileData.infantAgeMonths || ''), 10);
 
@@ -182,7 +222,7 @@ export default function MilestonesScreen({ onBack }: Props) {
           weekOrAge: String(data.weekOrAge || data.week || ''),
           status: normalizeStatus(data.status),
           notes: String(data.notes || ''),
-          stage: data.stage === 'POSTNATAL' ? 'POSTNATAL' : 'PRENATAL',
+          stage: normalizeStageValue(data.stage),
           order: Number.isFinite(Number(data.order)) ? Number(data.order) : 99,
         };
       });
@@ -280,10 +320,10 @@ export default function MilestonesScreen({ onBack }: Props) {
   const hiddenFutureCount = Math.max(milestones.length - unlockedMilestones.length, 0);
   const stageLevel = achieved + 1;
 
-  const heroBg     = isPostnatal ? '#0c4a6e' : '#3a0440';
-  const heroAccent = isPostnatal ? '#7dd3fc' : '#f5b8e8';
-  const accentCol  = isPostnatal ? '#0e7490' : '#55075c';
-  const roseCol    = isPostnatal ? '#34d399' : '#c9227a';
+  const heroBg     = '#3a0440';
+  const heroAccent = '#f5b8e8';
+  const accentCol  = '#55075c';
+  const roseCol    = '#c9227a';
 
   if (loading) {
     return (

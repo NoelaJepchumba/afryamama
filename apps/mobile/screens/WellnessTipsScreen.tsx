@@ -93,13 +93,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
   },
   hero: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingTop: 52,
-    paddingBottom: 18,
     paddingHorizontal: 20,
+    paddingBottom: 16,
     backgroundColor: '#3a0440',
   },
   backBtn: {
-    marginBottom: 12,
+    marginRight: 12,
   },
   backBtnText: {
     color: 'rgba(255,255,255,0.85)',
@@ -111,15 +113,8 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
   },
-  heroSub: {
-    marginTop: 6,
-    color: '#f5b8e8',
-    fontSize: 13,
-    lineHeight: 18,
-  },
   content: {
     padding: 18,
-    paddingBottom: 34,
   },
   heroCard: {
     backgroundColor: '#ffffff',
@@ -127,7 +122,7 @@ const styles = StyleSheet.create({
     borderColor: '#EBD6ED',
     borderRadius: 16,
     padding: 16,
-    marginBottom: 14,
+    marginBottom: 18,
     shadowColor: '#55075c',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.05,
@@ -143,7 +138,7 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     color: '#1a1a2e',
-    fontSize: 19,
+    fontSize: 22,
     fontWeight: '800',
     marginBottom: 4,
   },
@@ -154,9 +149,9 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: '#1a1a2e',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '700',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   emptyText: {
     color: '#94a3b8',
@@ -165,13 +160,13 @@ const styles = StyleSheet.create({
   },
   tipCard: {
     borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: 14,
     padding: 16,
     marginBottom: 12,
     shadowColor: '#55075c',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
     elevation: 2,
   },
   tipCategory: {
@@ -187,28 +182,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 8,
   },
-  tipContent: {
-    color: '#475569',
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 12,
-  },
   bulletLine: {
     color: '#475569',
     fontSize: 13,
     lineHeight: 20,
     marginBottom: 4,
-  },
-  readMoreBtn: {
-    alignSelf: 'flex-start',
-    borderWidth: 1,
-    borderColor: '#EBD6ED',
-    borderRadius: 999,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-  },
-  readMoreText: {
-    fontSize: 13,
-    fontWeight: '600',
   },
 });

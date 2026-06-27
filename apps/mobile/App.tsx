@@ -20,7 +20,6 @@ import {
   loadMotherProfile,
   loginWithFirebase,
   logoutFromFirebase,
-  sendMotherPasswordReset,
   signUpMotherWithFirebase,
 } from './lib/firebaseAuth';
 import { saveMotherProfile } from './lib/motherProfileStore';
@@ -89,10 +88,6 @@ export default function App() {
     }
   };
 
-  const handleForgotPassword = async (email: string) => {
-    await sendMotherPasswordReset(email);
-  };
-
   const handleLogout = async () => {
     await logoutFromFirebase();
     setUserName('');
@@ -114,7 +109,6 @@ export default function App() {
           <LoginScreen
             onLoginSuccess={handleLoginSuccess}
             onSignUpSuccess={handleSignUpSuccess}
-            onForgotPassword={handleForgotPassword}
           />
         );
       case 'DASHBOARD':
@@ -157,7 +151,6 @@ export default function App() {
           <LoginScreen
             onLoginSuccess={handleLoginSuccess}
             onSignUpSuccess={handleSignUpSuccess}
-            onForgotPassword={handleForgotPassword}
           />
         );
     }

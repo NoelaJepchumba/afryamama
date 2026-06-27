@@ -1,5 +1,6 @@
 import {
   addDoc,
+  arrayUnion,
   collection,
   deleteDoc,
   doc,
@@ -164,13 +165,11 @@ function readDoctorFacilityCandidates(data: Record<string, unknown>): string[] {
 }
 
 function isDoctorAvailable(data: Record<string, unknown>): boolean {
-  const explicitUnavailable = data.isAvailable === false || data.available === false;
   const inactive = String(data.status || '').toUpperCase() === 'INACTIVE';
-  const assigned = String(data.status || '').toUpperCase() === 'ASSIGNED';
-  const hasAssignedMother = Boolean(readText(data.assignedMotherId || data.assigned_to_mother, ''));
   const activeFalse = data.active === false;
 
-  return !(explicitUnavailable || inactive || assigned || hasAssignedMother || activeFalse);
+  // Doctors can handle multiple mothers. Only block inactive/disabled profiles.
+  return !(inactive || activeFalse);
 }
 
 async function getDoctorById(doctorId: string): Promise<DoctorAssignment | null> {
@@ -311,17 +310,34 @@ export async function reserveDoctorForMother(
   payload: { motherId?: string; motherEmail?: string; motherCode?: string }
 ): Promise<void> {
   const collectionName = assignment.collectionName || 'doctors';
+  const updatePayload: Record<string, unknown> = {
+    assignedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const motherId = readText(payload.motherId, '');
+  const motherEmail = readText(payload.motherEmail, '').toLowerCase();
+  const motherCode = readText(payload.motherCode, '');
+
+  if (motherId) {
+    updatePayload.assignedMotherIds = arrayUnion(motherId);
+    // Keep single-value fields for backward compatibility with older readers.
+    updatePayload.assignedMotherId = motherId;
+  }
+
+  if (motherEmail) {
+    updatePayload.assignedMotherEmails = arrayUnion(motherEmail);
+    updatePayload.assignedMotherEmail = motherEmail;
+  }
+
+  if (motherCode) {
+    updatePayload.assignedMotherCodes = arrayUnion(motherCode);
+    updatePayload.assignedMotherCode = motherCode;
+  }
+
   await setDoc(
     doc(firebaseDb, collectionName, assignment.doctorId),
-    {
-      status: 'ASSIGNED',
-      isAvailable: false,
-      assignedMotherId: payload.motherId || '',
-      assignedMotherEmail: payload.motherEmail || '',
-      assignedMotherCode: payload.motherCode || '',
-      assignedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
+    updatePayload,
     { merge: true }
   );
 }
@@ -370,6 +386,34 @@ async function findMotherDocByEmail(email: string): Promise<QueryDocumentSnapsho
   }
 
   return null;
+}
+
+async function findMotherDocsForUpsert(email: string, motherCode: string): Promise<QueryDocumentSnapshot[]> {
+  const matches = new Map<string, QueryDocumentSnapshot>();
+  const emailFields = ['email', 'Email', 'userEmail', 'user_email', 'motherEmail', 'mother_email'];
+  const codeFields = ['motherCode', 'mother_code', 'code'];
+
+  for (const field of emailFields) {
+    try {
+      const snapshot = await getDocs(query(collection(firebaseDb, 'mothers'), where(field, '==', email), limit(20)));
+      snapshot.docs.forEach((item) => matches.set(item.id, item));
+    } catch {
+      // Continue checking alternative field names.
+    }
+  }
+
+  if (motherCode) {
+    for (const field of codeFields) {
+      try {
+        const snapshot = await getDocs(query(collection(firebaseDb, 'mothers'), where(field, '==', motherCode), limit(20)));
+        snapshot.docs.forEach((item) => matches.set(item.id, item));
+      } catch {
+        // Continue checking alternative field names.
+      }
+    }
+  }
+
+  return Array.from(matches.values());
 }
 
 export async function getMotherProfileByEmail(email: string): Promise<MotherProfile | null> {
@@ -500,11 +544,22 @@ export async function saveMotherProfile(profile: MotherProfile): Promise<MotherP
 
   try {
     const docId = key.replace(/[^a-z0-9]/gi, '_');
-    const motherDocIds = Array.from(new Set([docId, authUid].filter(Boolean)));
+    const matchedDocs = await findMotherDocsForUpsert(key, motherCode);
+    const matchedIds = matchedDocs.map((item) => item.id);
 
-    await Promise.all(
-      motherDocIds.map((id) => setDoc(doc(firebaseDb, 'mothers', id), payload, { merge: true }))
-    );
+    const canonicalMotherDocId =
+      (authUid && matchedIds.includes(authUid) ? authUid : '') ||
+      (matchedIds.includes(docId) ? docId : '') ||
+      matchedIds[0] ||
+      authUid ||
+      docId;
+
+    await setDoc(doc(firebaseDb, 'mothers', canonicalMotherDocId), payload, { merge: true });
+
+    const duplicateIds = matchedIds.filter((id) => id !== canonicalMotherDocId);
+    if (duplicateIds.length > 0) {
+      await Promise.all(duplicateIds.map((id) => deleteDoc(doc(firebaseDb, 'mothers', id))));
+    }
 
     await Promise.all(
       normalizedChildren.map((child) => {
@@ -528,7 +583,7 @@ export async function saveMotherProfile(profile: MotherProfile): Promise<MotherP
 
     if (assignedDoctor) {
       await reserveDoctorForMother(assignedDoctor, {
-        motherId: authUid || key.replace(/[^a-z0-9]/gi, '_'),
+        motherId: canonicalMotherDocId,
         motherEmail: key,
         motherCode,
       });

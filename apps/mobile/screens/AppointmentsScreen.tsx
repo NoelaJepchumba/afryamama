@@ -342,7 +342,6 @@ export default function AppointmentsScreen({ email, onBack }: AppointmentsProps)
             </View>
 
             <View style={styles.cardBody}>
-              <Text style={styles.doctorName}>👩‍⚕️ Provider: {appt.doctor}</Text>
               <Text style={styles.reason}>📌 Reason: {cleanReason(appt.reason)}</Text>
             </View>
           </View>
@@ -378,7 +377,6 @@ export default function AppointmentsScreen({ email, onBack }: AppointmentsProps)
             </View>
 
             <View style={styles.cardBody}>
-              <Text style={styles.doctorName}>👩‍⚕️ Provider: {appt.doctor}</Text>
               <Text style={styles.reason}>📌 Reason: {cleanReason(appt.reason)}</Text>
             </View>
           </View>
@@ -819,11 +817,6 @@ const styles = StyleSheet.create({
   },
   cardBody: {
     gap: 4,
-  },
-  doctorName: {
-    color: '#0f172a',
-    fontSize: 14,
-    fontWeight: '700',
   },
   reason: {
     color: '#475569',

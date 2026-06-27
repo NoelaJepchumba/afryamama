@@ -13,6 +13,38 @@ interface UserRow {
   status?: string;
 }
 
+function normalizeValue(value: string | undefined): string {
+  return (value || '').trim().toLowerCase();
+}
+
+function dedupeRows(rows: UserRow[]): UserRow[] {
+  const byKey = new Map<string, UserRow>();
+
+  rows.forEach((row) => {
+    const normalizedEmail = normalizeValue(row.email);
+    const key = normalizedEmail && normalizedEmail !== '-'
+      ? `email:${normalizedEmail}`
+      : `name:${normalizeValue(row.name)}|phone:${normalizeValue(row.phone)}`;
+
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, row);
+      return;
+    }
+
+    const existingIsActive = normalizeValue(existing.status) === 'active';
+    const currentIsActive = normalizeValue(row.status) === 'active';
+    const existingInfoScore = Number(!!normalizeValue(existing.phone) && existing.phone !== '-') + Number(!!normalizeValue(existing.facility) && existing.facility !== '-');
+    const currentInfoScore = Number(!!normalizeValue(row.phone) && row.phone !== '-') + Number(!!normalizeValue(row.facility) && row.facility !== '-');
+
+    if ((currentIsActive && !existingIsActive) || (currentIsActive === existingIsActive && currentInfoScore > existingInfoScore)) {
+      byKey.set(key, row);
+    }
+  });
+
+  return Array.from(byKey.values());
+}
+
 export default function AdminUsersPage() {
   const [role, setRole] = useState<'mother' | 'doctor'>('mother');
   const [nameFilter, setNameFilter] = useState('');
@@ -41,7 +73,7 @@ export default function AdminUsersPage() {
           getDocs(collection(firebaseDb, 'doctors')),
         ]);
 
-        const motherRows: UserRow[] = motherSnapshot.docs.map((doc) => {
+        const motherRowsRaw: UserRow[] = motherSnapshot.docs.map((doc) => {
           const data = doc.data();
           const firstName = (data.firstName || data.first_name || '').toString().trim();
           const lastName = (data.lastName || data.last_name || '').toString().trim();
@@ -56,7 +88,7 @@ export default function AdminUsersPage() {
           };
         });
 
-        const doctorRows: UserRow[] = doctorSnapshot.docs.map((doc) => {
+        const doctorRowsRaw: UserRow[] = doctorSnapshot.docs.map((doc) => {
           const data = doc.data();
           const firstName = data.firstName || data.first_name || '';
           const lastName = data.lastName || data.last_name || '';
@@ -70,6 +102,9 @@ export default function AdminUsersPage() {
             status: (data.status || 'Inactive').toString(),
           };
         });
+
+        const motherRows = dedupeRows(motherRowsRaw);
+        const doctorRows = dedupeRows(doctorRowsRaw);
 
         setMothers(motherRows);
         setDoctors(doctorRows);
@@ -145,7 +180,7 @@ export default function AdminUsersPage() {
         sendCodeErrorMessage = 'Activation email request failed. Please check network/server status.';
       }
 
-      setDoctors((prev) => [
+      setDoctors((prev) => dedupeRows([
         {
           id: doctorRef.id,
           name: `${doctorFirstName.trim()} ${doctorLastName.trim()}`.trim(),
@@ -155,7 +190,7 @@ export default function AdminUsersPage() {
           status: 'Inactive',
         },
         ...prev,
-      ]);
+      ]));
 
       setDoctorFirstName('');
       setDoctorLastName('');

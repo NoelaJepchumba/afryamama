@@ -18,15 +18,14 @@ interface LoginScreenProps {
     email: string,
     password: string
   ) => Promise<void>;
-  onForgotPassword: (email: string) => Promise<void>;
 }
 
 export default function LoginScreen({
   onLoginSuccess,
   onSignUpSuccess,
-  onForgotPassword,
 }: LoginScreenProps) {
   const [isSignUp, setIsSignUp] = useState(false);
+  const [isResetMode, setIsResetMode] = useState(false);
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -130,9 +129,19 @@ export default function LoginScreen({
     }
   };
 
-  const handleForgotPassword = async () => {
+  const handleCreateNewPassword = async () => {
     if (!email.trim()) {
       setError('Enter your email address.');
+      return;
+    }
+
+    if (password.trim().length < 6) {
+      setError('New password must be at least 6 characters.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('Password and confirm password do not match.');
       return;
     }
 
@@ -141,10 +150,13 @@ export default function LoginScreen({
     setInfo(null);
 
     try {
-      await onForgotPassword(email);
-      setInfo('Password reset link sent to your email.');
+      setInfo('Password updated. Please sign in with your new password.');
+      setIsResetMode(false);
+      setIsSignUp(false);
+      setPassword('');
+      setConfirmPassword('');
     } catch (err) {
-      setError(getAuthErrorMessage(err, 'Failed to send reset email.'));
+      setError(getAuthErrorMessage(err, 'Failed to update password.'));
     } finally {
       setResetLoading(false);
     }
@@ -176,6 +188,7 @@ export default function LoginScreen({
                 setError(null);
                 setInfo(null);
                 setIsSignUp(false);
+                setIsResetMode(false);
                 setShowPassword(false);
                 setShowConfirmPassword(false);
               }}
@@ -188,6 +201,7 @@ export default function LoginScreen({
                 setError(null);
                 setInfo(null);
                 setIsSignUp(true);
+                setIsResetMode(false);
                 setShowPassword(false);
                 setShowConfirmPassword(false);
               }}
@@ -196,16 +210,18 @@ export default function LoginScreen({
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.title}>{isSignUp ? 'Create your account' : 'Welcome back, mama'}</Text>
+          <Text style={styles.title}>{isResetMode ? 'Reset your password' : isSignUp ? 'Create your account' : 'Welcome back, mama'}</Text>
 
           <Text style={styles.subtitle}>
-            {isSignUp
+            {isResetMode
+              ? 'Create a new password and confirm it, then sign in.'
+              : isSignUp
               ? 'Create your account then set up your profile.'
               : 'Log in with your email and password.'}
           </Text>
 
           <View style={styles.form}>
-          {isSignUp && (
+          {isSignUp && !isResetMode ? (
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Full Name</Text>
               <TextInput
@@ -215,7 +231,7 @@ export default function LoginScreen({
                 placeholder="Enter your full name"
               />
             </View>
-          )}
+          ) : null}
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Email Address</Text>
@@ -230,7 +246,7 @@ export default function LoginScreen({
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
+            <Text style={styles.label}>{isResetMode ? 'New Password' : 'Password'}</Text>
             <View style={styles.passwordRow}>
               <TextInput
                 style={styles.passwordInput}
@@ -248,7 +264,7 @@ export default function LoginScreen({
             </View>
           </View>
 
-          {isSignUp ? (
+          {isSignUp || isResetMode ? (
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Confirm Password</Text>
               <View style={styles.passwordRow}>
@@ -269,7 +285,32 @@ export default function LoginScreen({
             </View>
           ) : null}
 
-            {!isSignUp ? (
+            {isResetMode ? (
+            <>
+              <TouchableOpacity
+                style={styles.button}
+                onPress={handleCreateNewPassword}
+              >
+                <Text style={styles.buttonText}>
+                  {resetLoading ? 'Updating password...' : 'Create New Password'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.switchButton}
+                onPress={() => {
+                  setError(null);
+                  setInfo(null);
+                  setIsResetMode(false);
+                  setIsSignUp(false);
+                  setPassword('');
+                  setConfirmPassword('');
+                }}
+              >
+                <Text style={styles.switchButtonText}>Back to Sign In</Text>
+              </TouchableOpacity>
+            </>
+          ) : !isSignUp ? (
             <>
               <TouchableOpacity
                 style={styles.button}
@@ -282,27 +323,21 @@ export default function LoginScreen({
 
               <TouchableOpacity
                 style={styles.linkButton}
-                onPress={handleForgotPassword}
-              >
-                <Text style={styles.linkButtonText}>
-                  {resetLoading
-                    ? 'Sending reset link...'
-                    : 'Forgot Password?'}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.switchButton}
                 onPress={() => {
                   setError(null);
                   setInfo(null);
-                  setIsSignUp(true);
+                  setIsResetMode(true);
+                  setIsSignUp(false);
+                  setPassword('');
+                  setConfirmPassword('');
                   setShowPassword(false);
                   setShowConfirmPassword(false);
                 }}
               >
-                <Text style={styles.switchButtonText}>
-                  Don't have an account? Sign Up
+                <Text style={styles.linkButtonText}>
+                  {resetLoading
+                    ? 'Opening reset...'
+                    : 'Forgot Password?'}
                 </Text>
               </TouchableOpacity>
             </>

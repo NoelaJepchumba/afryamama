@@ -7,6 +7,7 @@ import { collection, getDocs, firebaseDb } from '@/lib/firebaseClient';
 interface MotherRow {
   id: string;
   name: string;
+  email: string;
   phone: string;
   location: string;
   status: string;
@@ -21,6 +22,39 @@ function toLabel(value: unknown, fallback = '-'): string {
     return String(value);
   }
   return fallback;
+}
+
+function normalizeValue(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function dedupeRows(rows: MotherRow[]): MotherRow[] {
+  const byEmail = new Map<string, MotherRow>();
+  const passthrough: MotherRow[] = [];
+
+  for (const row of rows) {
+    const normalizedEmail = normalizeValue(row.email);
+    if (!normalizedEmail) {
+      passthrough.push(row);
+      continue;
+    }
+
+    const current = byEmail.get(normalizedEmail);
+
+    if (!current) {
+      byEmail.set(normalizedEmail, row);
+      continue;
+    }
+
+    const currentScore = [current.name, current.phone, current.location, current.status].filter((value) => value && value !== '-').length;
+    const nextScore = [row.name, row.phone, row.location, row.status].filter((value) => value && value !== '-').length;
+
+    if (nextScore > currentScore) {
+      byEmail.set(normalizedEmail, row);
+    }
+  }
+
+  return [...Array.from(byEmail.values()), ...passthrough];
 }
 
 export default function MothersPage() {
@@ -46,6 +80,7 @@ export default function MothersPage() {
           return {
             id: docItem.id,
             name: fullName || toLabel(data.full_name ?? data.name, 'Unknown Mother'),
+            email: toLabel(data.email ?? data.Email ?? data.userEmail, ''),
             phone: toLabel(data.phone),
             location: toLabel(data.location ?? data.county),
             status: toLabel(data.status ?? data.maternalStatus ?? data.stage, 'UNKNOWN'),
@@ -53,7 +88,7 @@ export default function MothersPage() {
         });
 
         if (isMounted) {
-          setMothers(rows);
+          setMothers(dedupeRows(rows));
         }
       } finally {
         if (isMounted) setLoading(false);

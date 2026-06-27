@@ -37,14 +37,14 @@ export default function RecordsScreen({ email, onBack }: RecordsProps) {
         <TouchableOpacity onPress={onBack} style={styles.backBtn}>
           <Text style={styles.backBtnText}>← Back</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Health Reports</Text>
+        <Text style={styles.title}>Mother Health Records</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.heroCard}>
-          <Text style={styles.heroTag}>CARE RECORDS</Text>
-          <Text style={styles.heroTitle}>Clinical Records</Text>
-          <Text style={styles.heroText}>Doctor-reported ANC and PNC visit details are shown here.</Text>
+          <Text style={styles.heroTag}>MOTHER CARE</Text>
+          <Text style={styles.heroTitle}>Maternal Clinical Records</Text>
+          <Text style={styles.heroText}>Doctor-reported ANC and PNC visit details for the mother are shown here.</Text>
           {!loading ? (
             <View style={styles.metricPill}>
               <Text style={styles.metricLabel}>Entries</Text>
@@ -53,12 +53,12 @@ export default function RecordsScreen({ email, onBack }: RecordsProps) {
           ) : null}
         </View>
 
-        <Text style={styles.sectionTitle}>Maternal Progress Logs</Text>
+        <Text style={styles.sectionTitle}>Mother Visit Timeline</Text>
 
         {loading ? <Text style={styles.emptyText}>Loading records...</Text> : null}
 
         {!loading && records.length === 0 ? (
-          <Text style={styles.emptyText}>No ANC/PNC reports found yet.</Text>
+          <Text style={styles.emptyText}>No mother ANC/PNC reports found yet.</Text>
         ) : null}
 
         {records.map((rec) => (
@@ -84,7 +84,7 @@ export default function RecordsScreen({ email, onBack }: RecordsProps) {
               <View style={styles.vitalBox}>
                 <Text style={styles.vitalIcon}>❤️</Text>
                 <Text style={styles.vitalVal}>{rec.hr}</Text>
-                <Text style={styles.vitalLbl}>Fetal Heart Rate</Text>
+                <Text style={styles.vitalLbl}>Pulse / Heart Rate</Text>
               </View>
             </View>
 
@@ -107,14 +107,13 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
     paddingTop: 52,
-    paddingBottom: 16,
     paddingHorizontal: 20,
+    paddingBottom: 16,
     backgroundColor: '#3a0440',
   },
   backBtn: {
-    marginRight: 4,
+    marginRight: 12,
   },
   backBtnText: {
     color: 'rgba(255,255,255,0.85)',
@@ -127,9 +126,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   content: {
-    paddingHorizontal: 18,
-    paddingTop: 14,
-    paddingBottom: 34,
+    padding: 18,
   },
   heroCard: {
     backgroundColor: '#ffffff',
@@ -137,7 +134,7 @@ const styles = StyleSheet.create({
     borderColor: '#EBD6ED',
     borderRadius: 16,
     padding: 16,
-    marginBottom: 14,
+    marginBottom: 18,
     shadowColor: '#55075c',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.05,
@@ -147,13 +144,13 @@ const styles = StyleSheet.create({
   heroTag: {
     color: '#55075c',
     fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.1,
+    fontWeight: '700',
+    letterSpacing: 1,
     marginBottom: 6,
   },
   heroTitle: {
     color: '#1a1a2e',
-    fontSize: 19,
+    fontSize: 22,
     fontWeight: '800',
     marginBottom: 4,
   },
@@ -184,9 +181,9 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: '#1a1a2e',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '700',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   emptyText: {
     color: '#94a3b8',
@@ -197,13 +194,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#EBD6ED',
-    borderRadius: 16,
+    borderRadius: 14,
     padding: 16,
     marginBottom: 12,
     shadowColor: '#55075c',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
     elevation: 2,
   },
   cardHeader: {
@@ -211,7 +208,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+    borderBottomColor: '#EBD6ED',
     paddingBottom: 10,
     marginBottom: 14,
   },
@@ -241,7 +238,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
   vitalVal: {
-    color: '#0f172a',
+    color: '#1a1a2e',
     fontSize: 14,
     fontWeight: '700',
   },
@@ -263,7 +260,7 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   notesTitle: {
-    color: '#0f172a',
+    color: '#1a1a2e',
     fontSize: 12,
     fontWeight: '700',
     marginBottom: 4,

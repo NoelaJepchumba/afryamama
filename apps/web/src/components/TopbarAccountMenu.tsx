@@ -26,7 +26,7 @@ interface QuickStats {
 }
 
 const emptyProfile: ProfileModel = {
-  name: 'User',
+  name: '',
   email: '',
   title: '',
   memberSince: '',
@@ -59,31 +59,83 @@ export default function TopbarAccountMenu({ role }: TopbarAccountMenuProps) {
 
   useEffect(() => {
     async function loadProfile() {
-      if (!user?.email) {
-        setProfile(emptyProfile);
+      if (!user?.email && !user?.uid) {
+        setProfile({
+          ...emptyProfile,
+          name: role === 'ADMIN' ? 'Administrator' : 'Doctor',
+        });
         return;
       }
 
-      const collectionNames = role === 'ADMIN' ? ['Admins', 'admins'] : ['doctors', 'Doctors'];
+      const collectionNames = role === 'ADMIN' ? ['Admins'] : ['doctors', 'Doctors'];
       let found: Record<string, unknown> | null = null;
 
       for (const collectionName of collectionNames) {
-        const snapshot = await getDocs(
-          query(collection(firebaseDb, collectionName), where('email', '==', user.email), limit(1))
-        );
-        if (!snapshot.empty) {
-          found = snapshot.docs[0].data() as Record<string, unknown>;
+        if (user?.uid) {
+          try {
+            const byUidSnapshot = await getDocs(
+              query(collection(firebaseDb, collectionName), where('uid', '==', user.uid), limit(1))
+            );
+            if (!byUidSnapshot.empty) {
+              found = byUidSnapshot.docs[0].data() as Record<string, unknown>;
+              break;
+            }
+          } catch {
+            // Continue with email fallback.
+          }
+        }
+
+        const emailFields = ['email', 'Email', 'userEmail', 'user_email'];
+        for (const fieldName of emailFields) {
+          try {
+            const snapshot = await getDocs(
+              query(collection(firebaseDb, collectionName), where(fieldName, '==', user.email), limit(1))
+            );
+            if (!snapshot.empty) {
+              found = snapshot.docs[0].data() as Record<string, unknown>;
+              break;
+            }
+          } catch {
+            // Continue checking other field variants.
+          }
+        }
+
+        if (!found && user?.email) {
+          try {
+            const allDocs = await getDocs(collection(firebaseDb, collectionName));
+            const normalizedEmail = user.email.toLowerCase();
+            const matched = allDocs.docs.find((docItem) => {
+              const data = docItem.data() as Record<string, unknown>;
+              const candidates = [data.email, data.Email, data.userEmail, data.user_email]
+                .map((value) => (typeof value === 'string' ? value.trim().toLowerCase() : ''))
+                .filter(Boolean);
+              return candidates.includes(normalizedEmail);
+            });
+            if (matched) {
+              found = matched.data() as Record<string, unknown>;
+            }
+          } catch {
+            // Ignore collection scan failures.
+          }
+        }
+
+        if (found) {
           break;
         }
       }
 
       const firstName = (found?.firstName || found?.first_name || '').toString();
       const lastName = (found?.lastName || found?.last_name || '').toString();
-      const name = `${firstName} ${lastName}`.trim() || user.displayName || user.email || 'User';
+      const name =
+        `${firstName} ${lastName}`.trim() ||
+        (found?.fullName || found?.name || found?.username || '').toString().trim() ||
+        user.displayName ||
+        user.email ||
+        (role === 'ADMIN' ? 'Administrator' : 'Doctor');
 
       setProfile({
         name,
-        email: (found?.email || user.email || '').toString(),
+        email: (found?.email || found?.Email || found?.userEmail || found?.user_email || user.email || '').toString(),
         title: (
           found?.title ||
           found?.role ||
@@ -110,7 +162,7 @@ export default function TopbarAccountMenu({ role }: TopbarAccountMenuProps) {
 
     loadProfile();
     loadStats();
-  }, [role, user?.email, user?.displayName, user?.metadata.creationTime]);
+  }, [role, user?.email, user?.uid, user?.displayName, user?.metadata.creationTime]);
 
   const initials = useMemo(() => {
     const parts = profile.name.split(' ').filter(Boolean);

@@ -14,6 +14,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   query,
   updateDoc,
   where,
@@ -33,9 +34,19 @@ type Profile = {
   county:                string;
   facility:              string;
   assignedDoctorName?:   string;
+  assignedDoctorFacility?: string;
   emergencyContactName:  string;
   emergencyContactPhone: string;
+  email?:                string;
 };
+
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function getMotherDocIdFromEmail(value: string): string {
+  return normalizeEmail(value).replace(/[^a-z0-9]/gi, '_');
+}
 
 type Appointment  = { id: string; appointmentType: string; appointmentDate: string; status: string; };
 type Notification = {
@@ -156,19 +167,44 @@ export default function MotherDashboardScreen({
   useEffect(() => {
     const fetchAll = async () => {
       try {
-        const [profSnap, apptSnap, vaxSnap, recSnap] = await Promise.all([
+        const normalizedEmail = normalizeEmail(auth.currentUser?.email || '');
+        const emailDocId = normalizedEmail ? getMotherDocIdFromEmail(normalizedEmail) : '';
+
+        const [uidProfileSnap, emailProfileSnap, apptSnap, vaxSnap, recSnap] = await Promise.all([
           getDoc(doc(db, 'mothers', motherId)),
+          emailDocId ? getDoc(doc(db, 'mothers', emailDocId)) : Promise.resolve(null),
           getDocs(query(collection(db, 'appointments'),   where('motherId', '==', motherId))),
           getDocs(query(collection(db, 'vaccinations'),   where('motherId', '==', motherId))),
           getDocs(query(collection(db, 'health_records'), where('motherId', '==', motherId))),
         ]);
 
-        const normalizedEmail = (auth.currentUser?.email || '').trim().toLowerCase();
         const fetchedNotifications = normalizedEmail
           ? await fetchMotherNotifications(normalizedEmail)
           : [];
 
-        if (profSnap.exists())  setProfile(profSnap.data() as Profile);
+        let resolvedProfile: Profile | null = null;
+        if (uidProfileSnap.exists()) {
+          resolvedProfile = uidProfileSnap.data() as Profile;
+        } else if (emailProfileSnap && emailProfileSnap.exists()) {
+          resolvedProfile = emailProfileSnap.data() as Profile;
+        } else if (normalizedEmail) {
+          const emailFields = ['email', 'Email', 'userEmail', 'user_email', 'motherEmail', 'mother_email'];
+
+          for (const emailField of emailFields) {
+            try {
+              const byEmail = await getDocs(
+                query(collection(db, 'mothers'), where(emailField, '==', normalizedEmail), limit(1))
+              );
+              if (byEmail.empty) continue;
+              resolvedProfile = byEmail.docs[0].data() as Profile;
+              break;
+            } catch {
+              // Try other field variants.
+            }
+          }
+        }
+
+        if (resolvedProfile) setProfile(resolvedProfile);
         setAppointments(apptSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as Appointment[]);
         setNotifications(
           fetchedNotifications.map((item) => ({
@@ -246,13 +282,13 @@ export default function MotherDashboardScreen({
   const initials     = (name: string) => name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2) || '?';
 
   const stageLabel     = isPostnatalView ? 'Postnatal' : 'Prenatal';
-  const progressColor  = isPostnatalView ? '#0ea5e9' : '#c9227a';
-  const heroBg         = isPostnatalView ? '#0c4a6e' : '#3a0440';
-  const heroAccent     = isPostnatalView ? '#7dd3fc' : '#f5b8e8';
-  const ringColor      = isPostnatalView ? '#0ea5e9' : '#c9227a';
-  const tipBg          = isPostnatalView ? '#ecfeff' : '#fdf5f9';
-  const tipBorder      = isPostnatalView ? '#a5f3fc' : '#EBD6ED';
-  const tipColor       = isPostnatalView ? '#0c4a6e' : '#3a0440';
+  const progressColor  = '#c9227a';
+  const heroBg         = '#3a0440';
+  const heroAccent     = '#f5b8e8';
+  const ringColor      = '#c9227a';
+  const tipBg          = '#fdf5f9';
+  const tipBorder      = '#EBD6ED';
+  const tipColor       = '#3a0440';
   const currentStage   = isPostnatalView ? 'POSTNATAL' : 'PRENATAL';
 
   const stageTips = useMemo(() => {
@@ -508,7 +544,7 @@ export default function MotherDashboardScreen({
             <Text style={styles.heroAvatarText}>{initials(profile.fullName)}</Text>
           </View>
           <View style={styles.heroText}>
-            <Text style={styles.heroGreeting}>Good morning,</Text>
+            <Text style={styles.heroGreeting}>Jambo,</Text>
             <Text style={styles.heroName}>{greetingName} 👋</Text>
           </View>
           <TouchableOpacity style={styles.signOutBtn} onPress={onLogout}>
@@ -593,7 +629,7 @@ export default function MotherDashboardScreen({
                 <Text style={styles.doctorName}>
                   {/^dr\.?\s/i.test(profile.assignedDoctorName) ? profile.assignedDoctorName : `Dr. ${profile.assignedDoctorName}`}
                 </Text>
-                <Text style={styles.doctorFacility}>{profile.facility || 'Facility not set'}</Text>
+                <Text style={styles.doctorFacility}>{profile.assignedDoctorFacility || profile.facility || 'Facility not set'}</Text>
                 <Text style={styles.doctorCode}>Mother code: {profile.motherCode || '—'}</Text>
               </View>
             </View>

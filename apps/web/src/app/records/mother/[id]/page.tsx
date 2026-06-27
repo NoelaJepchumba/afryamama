@@ -148,13 +148,14 @@ export default function MotherPncPage({ params }: MotherPncPageProps) {
 
       try {
         const motherDoc = await getDoc(doc(firebaseDb, 'mothers', motherId));
-        const [maternalSnapshot, childrenSnapshot, childSnapshot] = await Promise.all([
+        const [maternalSnapshot, pncSnapshot, childrenSnapshot, childSnapshot] = await Promise.all([
           getDocs(collection(firebaseDb, 'maternalRecords')),
+          getDocs(collection(firebaseDb, 'pncRecords')),
           getDocs(collection(firebaseDb, 'children')),
           getDocs(collection(firebaseDb, 'child')),
         ]);
 
-        const maternalRows = maternalSnapshot.docs
+        const maternalRows = [...maternalSnapshot.docs, ...pncSnapshot.docs]
           .map((item) => ({ id: item.id, ...item.data() }))
           .filter((row: any) => row.motherId === motherId || row.mother_id === motherId);
 
@@ -284,14 +285,16 @@ export default function MotherPncPage({ params }: MotherPncPageProps) {
 
     setSaving(true);
     try {
-      const created = await addDoc(collection(firebaseDb, 'maternalRecords'), {
+      const created = await addDoc(collection(firebaseDb, 'pncRecords'), {
         motherId: id,
         mother_id: id,
         motherName: record.motherName,
         doctorEmail: user?.email || '',
         doctorUid: user?.uid || '',
         recordType: 'PNC',
+        visitType: 'PNC',
         type: 'POSTNATAL',
+        stage: 'POSTNATAL',
         weight: Number(form.weight),
         bp: form.bp,
         bloodPressure: form.bp,

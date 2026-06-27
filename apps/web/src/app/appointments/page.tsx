@@ -11,6 +11,7 @@ interface AppointmentRow {
   id: string;
   motherId: string;
   childId: string;
+  consultationFor: 'MOTHER' | 'CHILD';
   name: string;
   reason: string;
   time: string;
@@ -71,13 +72,77 @@ function toStatus(value: unknown): AppointmentStatus {
   return 'PENDING';
 }
 
+function normalizeDoctorName(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^dr\.?\s*/i, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function toStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter((item) => Boolean(item));
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return [value.trim()];
+  }
+
+  return [];
+}
+
 function isTodayAppointment(value: unknown): boolean {
-  if (typeof value !== 'string' || !value.trim()) return false;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return false;
+  let parsed: Date | null = null;
+
+  if (typeof value === 'string' && value.trim()) {
+    const direct = new Date(value);
+    parsed = Number.isNaN(direct.getTime()) ? null : direct;
+  } else if (value && typeof value === 'object' && 'toDate' in (value as Record<string, unknown>)) {
+    try {
+      const fromTimestamp = (value as { toDate: () => Date }).toDate();
+      parsed = Number.isNaN(fromTimestamp.getTime()) ? null : fromTimestamp;
+    } catch {
+      parsed = null;
+    }
+  }
+
+  if (!parsed) return false;
 
   const now = new Date();
   return parsed.toDateString() === now.toDateString();
+}
+
+function inferAppointmentFor(data: Record<string, unknown>): 'MOTHER' | 'CHILD' {
+  const childId = (data.childId || data.child_id || '').toString().trim();
+  const explicitType = (
+    data.appointmentFor ||
+    data.appointment_for ||
+    data.patientType ||
+    data.patient_type ||
+    data.targetType ||
+    data.target_type ||
+    ''
+  )
+    .toString()
+    .trim()
+    .toUpperCase();
+
+  if (explicitType.includes('CHILD') || explicitType.includes('BABY') || explicitType.includes('INFANT')) {
+    return 'CHILD';
+  }
+
+  const reason = (data.reason || data.notes || data.appointmentType || data.type || '').toString().toLowerCase();
+  const childKeywords = ['child', 'baby', 'infant', 'vaccine', 'immunization', 'growth', 'pediatric'];
+
+  if (childId || childKeywords.some((keyword) => reason.includes(keyword))) {
+    return 'CHILD';
+  }
+
+  return 'MOTHER';
 }
 
 export default function AppointmentsPage() {
@@ -141,6 +206,14 @@ export default function AppointmentsPage() {
   }
 
   function getRecordVisitPath(appt: AppointmentRow): string {
+    if (appt.consultationFor === 'CHILD') {
+      return appt.motherId
+        ? `/records/child/${appt.motherId}`
+        : appt.childId
+          ? `/records/child/${appt.childId}`
+          : '/records';
+    }
+
     const reason = appt.reason.toLowerCase();
     const likelyChildVisit =
       Boolean(appt.childId) ||
@@ -171,50 +244,128 @@ export default function AppointmentsPage() {
       }
 
       try {
-        const [doctorsSnapshot, appointmentsSnapshot, mothersSnapshot, mothersCapsSnapshot] = await Promise.all([
+        const [doctorsSnapshot, doctorsCapsSnapshot, appointmentsSnapshot, mothersSnapshot] = await Promise.all([
           getDocs(query(collection(firebaseDb, 'doctors'), where('email', '==', user.email), where('role', '==', 'DOCTOR'), where('active', '==', true), where('approved', '==', true), where('registrationStatus', '==', 'COMPLETE'), limit(1))),
+          getDocs(query(collection(firebaseDb, 'Doctors'), where('email', '==', user.email), limit(1))),
           getDocs(collection(firebaseDb, 'appointments')),
           getDocs(collection(firebaseDb, 'mothers')),
-          getDocs(collection(firebaseDb, 'Mothers')),
         ]);
 
-        if (!doctorsSnapshot.empty) {
-          const doctorData = doctorsSnapshot.docs[0].data() as Record<string, unknown>;
-          setDoctorDocId(doctorsSnapshot.docs[0].id);
+        let resolvedDoctorDoc = !doctorsSnapshot.empty
+          ? doctorsSnapshot.docs[0]
+          : !doctorsCapsSnapshot.empty
+            ? doctorsCapsSnapshot.docs[0]
+            : null;
+
+        if (!resolvedDoctorDoc) {
+          const normalizedUserEmail = user.email.trim().toLowerCase();
+          const [allDoctorsSnapshot, allDoctorsCapsSnapshot] = await Promise.all([
+            getDocs(collection(firebaseDb, 'doctors')),
+            getDocs(collection(firebaseDb, 'Doctors')),
+          ]);
+
+          const allDoctorDocs = [...allDoctorsSnapshot.docs, ...allDoctorsCapsSnapshot.docs];
+          resolvedDoctorDoc =
+            allDoctorDocs.find((docItem) => {
+              const data = docItem.data() as Record<string, unknown>;
+              const candidateEmail =
+                (data.email || data.Email || data.userEmail || data.user_email || '').toString().trim().toLowerCase();
+              return candidateEmail && candidateEmail === normalizedUserEmail;
+            }) || null;
+        }
+
+        const resolvedDoctorData = (resolvedDoctorDoc?.data() as Record<string, unknown> | undefined) || {};
+
+        const resolvedDoctorName = (() => {
+          if (!resolvedDoctorDoc) return (user.displayName || 'Doctor').toString();
+          const doctorData = resolvedDoctorData;
           const firstName = (doctorData.firstName || doctorData.first_name || '').toString().trim();
           const lastName = (doctorData.lastName || doctorData.last_name || '').toString().trim();
           const fullName = `${firstName} ${lastName}`.trim();
-          setDoctorName(fullName || (doctorData.name || doctorData.fullName || user.displayName || 'Doctor').toString());
+          return fullName || (doctorData.name || doctorData.fullName || user.displayName || 'Doctor').toString();
+        })();
+
+        if (resolvedDoctorDoc) {
+          setDoctorDocId(resolvedDoctorDoc.id);
         }
+        setDoctorName(resolvedDoctorName);
+
+        const resolvedDoctorDocId = resolvedDoctorDoc?.id || '';
+        const resolvedDoctorNameKey = normalizeDoctorName(resolvedDoctorName);
+        const assignedMotherEmails = [
+          ...toStringArray(resolvedDoctorData.assignedMotherEmails),
+          ...toStringArray(resolvedDoctorData.assigned_mother_emails),
+          ...toStringArray(resolvedDoctorData.motherEmails),
+          ...toStringArray(resolvedDoctorData.mother_emails),
+        ].map((value) => value.toLowerCase());
+        const assignedMotherIds = [
+          ...toStringArray(resolvedDoctorData.assignedMotherIds),
+          ...toStringArray(resolvedDoctorData.assigned_mother_ids),
+          ...toStringArray(resolvedDoctorData.motherIds),
+          ...toStringArray(resolvedDoctorData.mother_ids),
+        ];
 
         const motherNameById = new Map<string, string>();
-        const motherByKey = new Map<string, MotherOption>();
-        const allMotherDocs = [...mothersSnapshot.docs, ...mothersCapsSnapshot.docs];
+        const allMotherDocs = [...mothersSnapshot.docs];
+
+        const assignedMotherDocs = allMotherDocs.filter((docItem) => {
+          const data = docItem.data() as Record<string, unknown>;
+          const assignedDoctorId = (data.assignedDoctorId || data.assigned_doctor_id || '').toString().trim();
+          const assignedDoctorName = normalizeDoctorName(
+            (data.assignedDoctorName || data.assigned_doctor_name || '').toString()
+          );
+          const assignedDoctorEmail =
+            (data.assignedDoctorEmail || data.assigned_doctor_email || '').toString().trim().toLowerCase();
+
+          return (
+            (resolvedDoctorDocId && assignedDoctorId === resolvedDoctorDocId) ||
+            assignedDoctorId === user.uid ||
+            (resolvedDoctorNameKey && assignedDoctorName === resolvedDoctorNameKey) ||
+            (assignedDoctorEmail && assignedDoctorEmail === user.email!.trim().toLowerCase())
+          );
+        });
+
+        const motherDocsForOptions = assignedMotherDocs.length > 0 ? assignedMotherDocs : allMotherDocs;
+
+        const derivedAssignedMotherEmails = new Set<string>();
+        const derivedAssignedMotherIds = new Set<string>();
 
         allMotherDocs.forEach((docItem) => {
           const data = docItem.data() as Record<string, unknown>;
-          const mapped = mapMotherDocToOption(docItem.id, data);
-          const key = mapped.email.trim().toLowerCase() || docItem.id;
-          const existing = motherByKey.get(key);
+          const assignedDoctorId = (data.assignedDoctorId || data.assigned_doctor_id || '').toString().trim();
+          const assignedDoctorName = normalizeDoctorName(
+            (data.assignedDoctorName || data.assigned_doctor_name || '').toString()
+          );
+          const assignedDoctorEmail =
+            (data.assignedDoctorEmail || data.assigned_doctor_email || '').toString().trim().toLowerCase();
 
-          if (!existing) {
-            motherByKey.set(key, mapped);
-            return;
-          }
+          const doctorMatches =
+            (resolvedDoctorDocId && assignedDoctorId === resolvedDoctorDocId) ||
+            assignedDoctorId === user.uid ||
+            (resolvedDoctorNameKey && assignedDoctorName === resolvedDoctorNameKey) ||
+            (assignedDoctorEmail && assignedDoctorEmail === user.email!.trim().toLowerCase());
 
-          const existingNameScore = existing.fullName === 'Mother' ? 0 : 1;
-          const nextNameScore = mapped.fullName === 'Mother' ? 0 : 1;
-          const existingPhoneScore = existing.phone === '-' ? 0 : 1;
-          const nextPhoneScore = mapped.phone === '-' ? 0 : 1;
-          const existingScore = existingNameScore + existingPhoneScore;
-          const nextScore = nextNameScore + nextPhoneScore;
+          if (!doctorMatches) return;
 
-          if (nextScore > existingScore) {
-            motherByKey.set(key, mapped);
-          }
+          const motherId = (data.id || docItem.id || '').toString().trim();
+          const motherEmail = (data.email || data.Email || data.userEmail || '').toString().trim().toLowerCase();
+
+          if (motherId) derivedAssignedMotherIds.add(motherId);
+          if (motherEmail) derivedAssignedMotherEmails.add(motherEmail);
         });
 
-        const mappedMothers = Array.from(motherByKey.values()).sort((a, b) => a.fullName.localeCompare(b.fullName));
+        const allAssignedMotherEmails = new Set([
+          ...assignedMotherEmails,
+          ...Array.from(derivedAssignedMotherEmails),
+        ]);
+        const allAssignedMotherIds = new Set([
+          ...assignedMotherIds,
+          ...Array.from(derivedAssignedMotherIds),
+        ]);
+
+        const mappedMothers = motherDocsForOptions
+          .map((docItem) => mapMotherDocToOption(docItem.id, docItem.data() as Record<string, unknown>))
+          .sort((a, b) => a.fullName.localeCompare(b.fullName));
 
         if (isMounted) {
           setMotherOptions(mappedMothers);
@@ -239,11 +390,54 @@ export default function AppointmentsPage() {
           .filter((docItem) => {
             const data = docItem.data() as Record<string, unknown>;
 
-            const candidateEmails = [data.doctorEmail, data.doctor_email, data.email]
+            const candidateEmails = [
+              data.doctorEmail,
+              data.doctor_email,
+              data.primaryDoctorEmail,
+              data.primary_doctor_email,
+              data.email,
+            ]
               .filter((value): value is string => typeof value === 'string')
               .map((value) => value.trim().toLowerCase());
 
-            const candidateUids = [data.doctorUid, data.doctor_uid, data.doctorId]
+            const candidateDoctorIds = [
+              data.doctorId,
+              data.doctorUid,
+              data.doctor_uid,
+              data.primaryDoctorId,
+              data.primaryDoctorUid,
+              data.primary_doctor_id,
+              data.primary_doctor_uid,
+            ]
+              .filter((value): value is string => typeof value === 'string')
+              .map((value) => value.trim());
+
+            const candidateDoctorNames = [
+              data.doctorName,
+              data.doctor_name,
+              data.primaryDoctorName,
+              data.primary_doctor_name,
+              data.assignedDoctorName,
+              data.assigned_doctor_name,
+            ]
+              .map((value) => normalizeDoctorName(value))
+              .filter((value) => Boolean(value));
+
+            const candidateMotherEmails = [
+              data.motherEmail,
+              data.email,
+              data.userEmail,
+              data.patientEmail,
+            ]
+              .filter((value): value is string => typeof value === 'string')
+              .map((value) => value.trim().toLowerCase());
+
+            const candidateMotherIds = [
+              data.motherId,
+              data.mother_id,
+              data.patientId,
+              data.patient_id,
+            ]
               .filter((value): value is string => typeof value === 'string')
               .map((value) => value.trim());
 
@@ -256,7 +450,15 @@ export default function AppointmentsPage() {
 
             const isForToday = isTodayAppointment(dateValue);
 
-            return (candidateEmails.includes(user.email!.trim().toLowerCase()) || candidateUids.includes(user.uid)) && isForToday;
+            const matchesDoctor =
+              candidateEmails.includes(user.email!.trim().toLowerCase()) ||
+              candidateDoctorIds.includes(user.uid) ||
+              (resolvedDoctorDocId ? candidateDoctorIds.includes(resolvedDoctorDocId) : false) ||
+              (resolvedDoctorNameKey ? candidateDoctorNames.includes(resolvedDoctorNameKey) : false) ||
+              candidateMotherEmails.some((value) => allAssignedMotherEmails.has(value)) ||
+              candidateMotherIds.some((value) => allAssignedMotherIds.has(value));
+
+            return matchesDoctor && isForToday;
           })
           .map((docItem) => {
             const data = docItem.data() as Record<string, unknown>;
@@ -270,6 +472,7 @@ export default function AppointmentsPage() {
               id: docItem.id,
               motherId,
               childId,
+              consultationFor: inferAppointmentFor(data),
               name:
                 inlineName ||
                 (data.motherName || data.patientName || '').toString() ||
@@ -397,6 +600,7 @@ export default function AppointmentsPage() {
               <thead>
                 <tr>
                   <th>Patient Name</th>
+                  <th>For</th>
                   <th>Reason for Consultation</th>
                   <th>Scheduled Date & Time</th>
                   <th>Status</th>
@@ -406,16 +610,21 @@ export default function AppointmentsPage() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={5}>Loading appointments from Firestore...</td>
+                    <td colSpan={6}>Loading appointments from Firestore...</td>
                   </tr>
                 ) : appointments.length === 0 ? (
                   <tr>
-                    <td colSpan={5}>No appointments found for this doctor.</td>
+                    <td colSpan={6}>No appointments found for this doctor.</td>
                   </tr>
                 ) : (
                   appointments.map((appt) => (
                     <tr key={appt.id}>
                       <td style={{ fontWeight: '600' }}>{appt.name}</td>
+                      <td>
+                        <span className={`badge ${appt.consultationFor === 'CHILD' ? 'badge-warning' : 'badge-success'}`}>
+                          {appt.consultationFor}
+                        </span>
+                      </td>
                       <td>{appt.reason}</td>
                       <td>{appt.time}</td>
                       <td>
