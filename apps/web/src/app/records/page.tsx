@@ -67,29 +67,23 @@ function asDateLabel(value: unknown): string {
   return '-';
 }
 
+function key(value: unknown): string {
+  return asLabel(value, '').trim().toLowerCase();
+}
+
 function inferMaternalType(data: Record<string, unknown>): string {
   const raw = asLabel(data.type ?? data.appointmentType ?? data.visitType ?? data.recordType, 'ANC').toUpperCase();
   if (raw.includes('PNC') || raw.includes('POSTNATAL')) return 'PNC';
   return 'ANC';
 }
 
-function isToday(value: unknown): boolean {
-  if (typeof value !== 'string' || !value.trim()) return false;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return false;
-  return parsed.toDateString() === new Date().toDateString();
-}
+function inferCareTypeWithStatus(data: Record<string, unknown>, motherStatus: string): string {
+  const explicit = inferMaternalType(data);
+  if (explicit === 'PNC') return 'PNC';
 
-function isForCurrentDoctor(data: Record<string, unknown>, doctorEmail: string, doctorUid: string): boolean {
-  const emailCandidates = [data.doctorEmail, data.doctor_email, data.email]
-    .filter((value): value is string => typeof value === 'string')
-    .map((value) => value.trim().toLowerCase());
-
-  const uidCandidates = [data.doctorUid, data.doctor_uid, data.doctorId]
-    .filter((value): value is string => typeof value === 'string')
-    .map((value) => value.trim());
-
-  return emailCandidates.includes(doctorEmail) || uidCandidates.includes(doctorUid);
+  const status = motherStatus.toUpperCase();
+  if (status.includes('POSTNATAL') || status.includes('POST NATAL') || status.includes('PNC')) return 'PNC';
+  return 'ANC';
 }
 
 export default function RecordsPage() {
@@ -129,15 +123,16 @@ export default function RecordsPage() {
       }
 
       try {
-        const [mothersSnapshot, pregnanciesSnapshot, maternalSnapshot, pncSnapshot, childrenSnapshot, growthSnapshot, growthLegacySnapshot, immunizationSnapshot] =
+        const [mothersSnapshot, pregnanciesSnapshot, maternalSnapshot, appointmentsSnapshot, childrenSnapshot, childSnapshot, growthSnapshot, growthAltSnapshot, immunizationSnapshot] =
           await Promise.all([
             getDocs(collection(firebaseDb, 'mothers')),
             getDocs(collection(firebaseDb, 'pregnancies')),
             getDocs(collection(firebaseDb, 'maternalRecords')),
             getDocs(collection(firebaseDb, 'pncRecords')),
             getDocs(collection(firebaseDb, 'children')),
-            getDocs(collection(firebaseDb, 'child_growth')),
+            getDocs(collection(firebaseDb, 'child')),
             getDocs(collection(firebaseDb, 'growthRecords')),
+            getDocs(collection(firebaseDb, 'growth_records')),
             getDocs(collection(firebaseDb, 'immunizations')),
           ]);
 
@@ -145,15 +140,14 @@ export default function RecordsPage() {
         const doctorUid = user.uid;
 
         const mothersById = new Map<string, string>();
-        const mappedMothers: MotherOption[] = [];
+        const motherStatusById = new Map<string, string>();
         mothersSnapshot.docs.forEach((docItem) => {
           const data = docItem.data() as Record<string, unknown>;
           const firstName = asLabel(data.firstName ?? data.first_name, '');
           const lastName = asLabel(data.lastName ?? data.last_name, '');
           const fullName = `${firstName} ${lastName}`.trim();
-          const displayName = fullName || asLabel(data.full_name ?? data.name, 'Unknown Mother');
-          mothersById.set(docItem.id, displayName);
-          mappedMothers.push({ id: docItem.id, name: displayName });
+          mothersById.set(docItem.id, fullName || asLabel(data.full_name ?? data.name, 'Unknown Mother'));
+          motherStatusById.set(docItem.id, asLabel(data.status ?? data.maternalStatus ?? data.stage, 'UNKNOWN'));
         });
 
         const pregnanciesByMotherId = new Map<string, Record<string, unknown>>();
@@ -163,25 +157,55 @@ export default function RecordsPage() {
           if (motherId) pregnanciesByMotherId.set(motherId, data);
         });
 
-        const combinedMaternal: MaternalRow[] = [...maternalSnapshot.docs, ...pncSnapshot.docs]
+        const maternal: MaternalRow[] = maternalSnapshot.docs.map((docItem) => {
+          const data = docItem.data() as Record<string, unknown>;
+          const motherId = asLabel(data.motherId ?? data.mother_id, '');
+          const pregnancy = pregnanciesByMotherId.get(motherId);
+          const gestation = asLabel(data.gestationWeeks ?? data.gestation, '-');
+          const pregnancyStatus = asLabel(pregnancy?.status, 'Active');
+          const motherStatus = motherStatusById.get(motherId) || '';
+
+          return {
+            id: docItem.id,
+            motherId,
+            careType: inferCareTypeWithStatus(data, motherStatus),
+            patient: mothersById.get(motherId) || asLabel(data.motherName ?? data.patientName, 'Unknown Mother'),
+            pregnancyTerm: gestation === '-' ? pregnancyStatus : `${gestation} Weeks (${pregnancyStatus})`,
+            checkupDate: asDateLabel(data.checkupDate ?? data.visitDate ?? data.date ?? data.recordedDate),
+            weight: asLabel(data.weight, '-'),
+            bp: asLabel(data.bloodPressure ?? data.bp, '-'),
+            fhr: (() => {
+              const raw = data.fetalHeartRate ?? data.fhr;
+              if (typeof raw === 'number') return `${raw} bpm`;
+              const txt = asLabel(raw, '-');
+              return txt === '-' ? txt : txt.includes('bpm') ? txt : `${txt} bpm`;
+            })(),
+            notes: asLabel(data.clinicalObservations ?? data.notes ?? data.plan, 'No clinical notes.'),
+          };
+        });
+
+        const maternalFromAppointments: MaternalRow[] = appointmentsSnapshot.docs
           .map((docItem) => {
             const data = docItem.data() as Record<string, unknown>;
             return { id: docItem.id, data };
           })
           .filter(({ data }) => {
-            const dateValue = data.checkupDate ?? data.visitDate ?? data.date ?? data.recordedDate ?? data.createdAt;
-            return isForCurrentDoctor(data, doctorEmail, doctorUid) && isToday(dateValue);
+            // Keep only ANC-style appointments in this table source.
+            // PNC follow-ups should not appear in the PNC recorded-visits container.
+            const typeText = asLabel(data.type ?? data.appointmentType ?? data.visitType ?? data.recordType ?? data.reason, '').toUpperCase();
+            return typeText.includes('ANC') || typeText.includes('ANTENATAL') || typeText.includes('PRENATAL');
           })
           .map(({ id, data }) => {
             const motherId = asLabel(data.motherId ?? data.mother_id, '');
             const pregnancy = pregnanciesByMotherId.get(motherId);
             const gestation = asLabel(data.gestationWeeks ?? data.gestation, '-');
             const pregnancyStatus = asLabel(pregnancy?.status, 'Active');
+            const motherStatus = motherStatusById.get(motherId) || '';
 
             return {
               id,
               motherId,
-              careType: inferMaternalType(data),
+              careType: 'ANC',
               patient: mothersById.get(motherId) || asLabel(data.motherName ?? data.patientName, 'Unknown Mother'),
               pregnancyTerm: gestation === '-' ? pregnancyStatus : `${gestation} Weeks (${pregnancyStatus})`,
               checkupDate: asDateLabel(data.checkupDate ?? data.visitDate ?? data.date ?? data.recordedDate),
@@ -199,37 +223,43 @@ export default function RecordsPage() {
           .sort((a, b) => b.checkupDate.localeCompare(a.checkupDate));
 
         const growthByChildId = new Map<string, Record<string, unknown>>();
-        [...growthSnapshot.docs, ...growthLegacySnapshot.docs].forEach((docItem) => {
+        [...growthSnapshot.docs, ...growthAltSnapshot.docs].forEach((docItem) => {
           const data = docItem.data() as Record<string, unknown>;
-          const dateValue = data.checkupDate ?? data.date ?? data.createdAt;
-          if (!isForCurrentDoctor(data, doctorEmail, doctorUid) || !isToday(dateValue)) return;
-          const childId = asLabel(data.childId ?? data.child_id, '');
-          if (!childId || growthByChildId.has(childId)) return;
-          growthByChildId.set(childId, data);
+          const linkedChildId = key(data.childId ?? data.child_id ?? data.childDocId);
+          const ownId = key(docItem.id);
+          if (linkedChildId && !growthByChildId.has(linkedChildId)) {
+            growthByChildId.set(linkedChildId, data);
+          }
+          if (ownId && !growthByChildId.has(ownId)) {
+            growthByChildId.set(ownId, data);
+          }
         });
 
         const immunizationByChildId = new Map<string, Record<string, unknown>>();
         immunizationSnapshot.docs.forEach((docItem) => {
           const data = docItem.data() as Record<string, unknown>;
-          const dateValue = data.nextVaccineDate ?? data.date ?? data.createdAt;
-          if (!isForCurrentDoctor(data, doctorEmail, doctorUid) || !isToday(dateValue)) return;
-          const childId = asLabel(data.childId ?? data.child_id, '');
-          if (!childId || immunizationByChildId.has(childId)) return;
-          immunizationByChildId.set(childId, data);
+          const linkedChildId = key(data.childId ?? data.child_id ?? data.childDocId);
+          const ownId = key(docItem.id);
+          if (linkedChildId && !immunizationByChildId.has(linkedChildId)) {
+            immunizationByChildId.set(linkedChildId, data);
+          }
+          if (ownId && !immunizationByChildId.has(ownId)) {
+            immunizationByChildId.set(ownId, data);
+          }
         });
 
-        const child: ChildRow[] = childrenSnapshot.docs.map((docItem) => {
+        const child: ChildRow[] = [...childrenSnapshot.docs, ...childSnapshot.docs].map((docItem) => {
           const data = docItem.data() as Record<string, unknown>;
           const motherId = asLabel(data.motherId ?? data.mother_id, '');
-          const growth = growthByChildId.get(docItem.id);
-          const immunization = immunizationByChildId.get(docItem.id);
+          const growth = growthByChildId.get(key(docItem.id));
+          const immunization = immunizationByChildId.get(key(docItem.id));
 
           return {
             id: docItem.id,
-            childName: asLabel(data.name ?? data.childName, 'Unknown Child'),
-            mother: mothersById.get(motherId) || asLabel(data.motherName, '-'),
-            dob: asDateLabel(data.dateOfBirth ?? data.dob),
-            weight: asLabel(growth?.weight ?? data.weight, '-'),
+            childName: asLabel(data.fullName ?? data.name ?? data.childName, 'Unknown Child'),
+            mother: asLabel(data.motherName, mothersById.get(motherId) || '-'),
+            dob: asDateLabel(data.birthDate ?? data.dateOfBirth ?? data.dob),
+            weight: asLabel(growth?.weight ?? data.birthWeightKg ?? data.weight, '-'),
             height: asLabel(growth?.height ?? data.height, '-'),
             recentVaccine: asLabel(immunization?.vaccine ?? immunization?.vaccineName, '-'),
             vaccineStatus: asLabel(immunization?.status, 'Due'),

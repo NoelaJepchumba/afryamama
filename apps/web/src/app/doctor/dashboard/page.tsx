@@ -19,7 +19,6 @@ interface DashboardMetrics {
 interface AppointmentRow {
   id: string;
   motherName: string;
-  age: string;
   contact: string;
   appointmentTime: string;
   consultationFor: 'MOTHER' | 'CHILD';
@@ -65,116 +64,6 @@ function getStatusBadgeClass(status: string): string {
   return 'badge-success';
 }
 
-function toAgeLabel(value: unknown): string {
-  if (typeof value !== 'string') return '-';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return '-';
-
-  const now = new Date();
-  let age = now.getFullYear() - parsed.getFullYear();
-  const monthDiff = now.getMonth() - parsed.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < parsed.getDate())) {
-    age -= 1;
-  }
-  return age >= 0 ? String(age) : '-';
-}
-
-function normalizeDoctorName(value: unknown): string {
-  if (typeof value !== 'string') return '';
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/^dr\.?\s*/i, '')
-    .replace(/[^a-z0-9]/g, '');
-}
-
-function toStringArray(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => (typeof item === 'string' ? item.trim() : ''))
-      .filter((item) => Boolean(item));
-  }
-
-  if (typeof value === 'string' && value.trim()) {
-    return [value.trim()];
-  }
-
-  return [];
-}
-
-function mapMotherDocToOption(docId: string, data: Record<string, unknown>): MotherOption {
-  const firstName = (data.firstName || data.first_name || '').toString().trim();
-  const lastName = (data.lastName || data.last_name || '').toString().trim();
-  const fullName =
-    `${firstName} ${lastName}`.trim() ||
-    (data.fullName || data.name || data.motherName || 'Mother').toString();
-
-  const stageRaw = (data.stage || data.motherStage || 'PRENATAL').toString().toUpperCase();
-  const stage: 'PRENATAL' | 'POSTNATAL' = stageRaw === 'POSTNATAL' ? 'POSTNATAL' : 'PRENATAL';
-  const pregnancyWeek = Number.parseInt((data.pregnancyWeek || data.week || '').toString(), 10);
-  const babyAgeMonths = Number.parseInt((data.babyAgeMonths || data.infantAgeMonths || '').toString(), 10);
-
-  return {
-    id: docId,
-    fullName,
-    email: (data.email || data.Email || data.userEmail || '').toString(),
-    phone: (data.phone || data.phoneNumber || data.contact || '-').toString(),
-    stage,
-    pregnancyWeek: Number.isNaN(pregnancyWeek) ? null : pregnancyWeek,
-    babyAgeMonths: Number.isNaN(babyAgeMonths) ? null : babyAgeMonths,
-  };
-}
-
-function isTodayAppointment(value: unknown): boolean {
-  let parsed: Date | null = null;
-
-  if (typeof value === 'string' && value.trim()) {
-    const direct = new Date(value);
-    parsed = Number.isNaN(direct.getTime()) ? null : direct;
-  } else if (value && typeof value === 'object' && 'toDate' in (value as Record<string, unknown>)) {
-    try {
-      const fromTimestamp = (value as { toDate: () => Date }).toDate();
-      parsed = Number.isNaN(fromTimestamp.getTime()) ? null : fromTimestamp;
-    } catch {
-      parsed = null;
-    }
-  }
-
-  if (!parsed) return false;
-
-  const now = new Date();
-  return parsed.toDateString() === now.toDateString();
-}
-
-function inferAppointmentFor(data: Record<string, unknown>): 'MOTHER' | 'CHILD' {
-  const childId = (data.childId || data.child_id || '').toString().trim();
-  const explicitType = (
-    data.appointmentFor ||
-    data.appointment_for ||
-    data.patientType ||
-    data.patient_type ||
-    data.targetType ||
-    data.target_type ||
-    ''
-  )
-    .toString()
-    .trim()
-    .toUpperCase();
-
-  if (explicitType.includes('CHILD') || explicitType.includes('BABY') || explicitType.includes('INFANT')) {
-    return 'CHILD';
-  }
-
-  const reason = (data.reason || data.notes || data.appointmentType || data.type || '').toString().toLowerCase();
-  const childKeywords = ['child', 'baby', 'infant', 'vaccine', 'immunization', 'growth', 'pediatric'];
-
-  if (childId || childKeywords.some((keyword) => reason.includes(keyword))) {
-    return 'CHILD';
-  }
-
-  return 'MOTHER';
-}
-
 export default function DoctorDashboard() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -182,7 +71,6 @@ export default function DoctorDashboard() {
   const [metrics, setMetrics] = useState<DashboardMetrics>(emptyMetrics);
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [nameFilter, setNameFilter] = useState('');
-  const [ageFilter, setAgeFilter] = useState('');
   const [contactFilter, setContactFilter] = useState('');
   const [timeFilter, setTimeFilter] = useState('');
   const [reasonFilter, setReasonFilter] = useState('');
@@ -291,8 +179,10 @@ export default function DoctorDashboard() {
           const firstName = (doctorData.firstName || doctorData.first_name || '').toString().trim();
           const lastName = (doctorData.lastName || doctorData.last_name || '').toString().trim();
           const fullName = `${firstName} ${lastName}`.trim();
-          return fullName || (doctorData.name || doctorData.fullName || user.displayName || user.email || 'Doctor').toString();
-        })();
+          setDoctorName(fullName || user.email || 'Doctor');
+        } else {
+          setDoctorName(user.email || 'Doctor');
+        }
 
         if (resolvedDoctorDoc) {
           setDoctorDocId(resolvedDoctorDoc.id);
@@ -320,78 +210,39 @@ export default function DoctorDashboard() {
           getDocs(collection(firebaseDb, 'appointments')),
         ]);
 
-        const derivedAssignedMotherEmails = new Set<string>();
-        const derivedAssignedMotherIds = new Set<string>();
-
+        const motherPhoneById = new Map<string, string>();
+        const prenatalMotherIds = new Set<string>();
         mothersSnapshot.docs.forEach((docItem: DocSnapshotLike) => {
           const data = docItem.data() as Record<string, unknown>;
-          const assignedDoctorId = (data.assignedDoctorId || data.assigned_doctor_id || '').toString().trim();
-          const assignedDoctorName = normalizeDoctorName(
-            (data.assignedDoctorName || data.assigned_doctor_name || '').toString()
-          );
-          const assignedDoctorEmail =
-            (data.assignedDoctorEmail || data.assigned_doctor_email || '').toString().trim().toLowerCase();
+          const phone = (data.phone || data.contact || data.phoneNumber || '').toString().trim();
+          if (phone) {
+            motherPhoneById.set(docItem.id, phone);
+          }
 
-          const doctorMatches =
-            (resolvedDoctorDocId && assignedDoctorId === resolvedDoctorDocId) ||
-            assignedDoctorId === user.uid ||
-            (resolvedDoctorNameKey && assignedDoctorName === resolvedDoctorNameKey) ||
-            (assignedDoctorEmail && assignedDoctorEmail === user.email!.trim().toLowerCase());
-
-          if (!doctorMatches) return;
-
-          const motherId = (data.id || docItem.id || '').toString().trim();
-          const motherEmail = (data.email || data.Email || data.userEmail || '').toString().trim().toLowerCase();
-
-          if (motherId) derivedAssignedMotherIds.add(motherId);
-          if (motherEmail) derivedAssignedMotherEmails.add(motherEmail);
+          const status = (data.status || data.maternalStatus || data.stage || '').toString().trim().toUpperCase();
+          if (status.includes('PRENATAL') || status.includes('PREG')) {
+            prenatalMotherIds.add(docItem.id);
+          }
         });
 
-        const allAssignedMotherEmails = new Set([
-          ...assignedMotherEmails,
-          ...Array.from(derivedAssignedMotherEmails),
-        ]);
-        const allAssignedMotherIds = new Set([
-          ...assignedMotherIds,
-          ...Array.from(derivedAssignedMotherIds),
-        ]);
-
-        const motherAgeById = new Map<string, string>();
-        const allMotherDocs = [...mothersSnapshot.docs];
-
-        const assignedMotherDocs = allMotherDocs.filter((docItem: DocSnapshotLike) => {
+        const pregnancyMotherIds = new Set<string>();
+        pregnanciesSnapshot.docs.forEach((docItem: DocSnapshotLike) => {
           const data = docItem.data() as Record<string, unknown>;
-          const assignedDoctorId = (data.assignedDoctorId || data.assigned_doctor_id || '').toString().trim();
-          const assignedDoctorName = normalizeDoctorName(
-            (data.assignedDoctorName || data.assigned_doctor_name || '').toString()
-          );
-          const assignedDoctorEmail =
-            (data.assignedDoctorEmail || data.assigned_doctor_email || '').toString().trim().toLowerCase();
-
-          return (
-            (resolvedDoctorDocId && assignedDoctorId === resolvedDoctorDocId) ||
-            assignedDoctorId === user.uid ||
-            (resolvedDoctorNameKey && assignedDoctorName === resolvedDoctorNameKey) ||
-            (assignedDoctorEmail && assignedDoctorEmail === user.email!.trim().toLowerCase())
-          );
+          const motherId = (data.motherId || data.mother_id || '').toString().trim();
+          const status = (data.status || '').toString().trim().toUpperCase();
+          if (!motherId) return;
+          if (!status || status === 'ACTIVE' || status === 'ONGOING' || status === 'PREGNANT') {
+            pregnancyMotherIds.add(motherId);
+          }
         });
 
-        const motherDocsForOptions = assignedMotherDocs.length > 0 ? assignedMotherDocs : allMotherDocs;
+        const activePregnancyCount = new Set<string>([
+          ...pregnancyMotherIds,
+          ...prenatalMotherIds,
+        ]).size;
 
-        const mappedMothers = motherDocsForOptions
-          .map((docItem: DocSnapshotLike) => mapMotherDocToOption(docItem.id, docItem.data() as Record<string, unknown>))
-          .sort((a, b) => a.fullName.localeCompare(b.fullName));
-
-        setMotherOptions(mappedMothers);
-        if (!selectedMotherId && mappedMothers.length > 0) {
-          setSelectedMotherId(mappedMothers[0].id);
-          setAppointmentStage(mappedMothers[0].stage);
-        }
-
-        allMotherDocs.forEach((docItem: DocSnapshotLike) => {
-          const data = docItem.data() as Record<string, unknown>;
-          motherAgeById.set(docItem.id, toAgeLabel(data.dateOfBirth || data.dob));
-        });
+        const today = new Date();
+        const todayKey = today.toISOString().slice(0, 10);
 
         const doctorAppointments = allAppointmentsSnapshot.docs.filter((docItem: DocSnapshotLike) => {
           const data = docItem.data() as Record<string, unknown>;
@@ -477,8 +328,7 @@ export default function DoctorDashboard() {
           return {
             id: docItem.id,
             motherName,
-            age: motherAgeById.get(motherId) || '-',
-            contact: (data.phone || data.contact || data.motherPhone || '-').toString(),
+            contact: motherPhoneById.get(motherId) || (data.phone || data.contact || data.motherPhone || '-').toString(),
             appointmentTime: toTimeLabel(data.dateTime || data.appointmentTime || data.date),
             consultationFor,
             reason: (data.reason || data.notes || 'Consultation').toString(),
@@ -498,6 +348,8 @@ export default function DoctorDashboard() {
 
         setMetrics({
           activeMothers: mappedMothers.length,
+          activeMothers: mothersSnapshot.size,
+          activePregnancies: activePregnancyCount,
           todaysAppointments,
           infantsMonitored: childrenSnapshot.size,
         });
@@ -508,7 +360,7 @@ export default function DoctorDashboard() {
     }
 
     loadDashboardData();
-  }, [user?.email, user?.uid, user?.displayName, selectedMotherId]);
+  }, [user?.email, user?.uid]);
 
   const welcomeName = useMemo(() => {
     if (!doctorName) return 'Doctor';
@@ -517,24 +369,22 @@ export default function DoctorDashboard() {
 
   const filteredAppointments = useMemo(() => {
     const nameTerm = nameFilter.trim().toLowerCase();
-    const ageTerm = ageFilter.trim().toLowerCase();
     const contactTerm = contactFilter.trim().toLowerCase();
     const timeTerm = timeFilter.trim().toLowerCase();
     const reasonTerm = reasonFilter.trim().toLowerCase();
     const statusTerm = statusFilter.trim().toLowerCase();
 
-    if (!nameTerm && !ageTerm && !contactTerm && !timeTerm && !reasonTerm && !statusTerm) return appointments;
+    if (!nameTerm && !contactTerm && !timeTerm && !reasonTerm && !statusTerm) return appointments;
 
     return appointments.filter((item) => {
       const nameMatches = !nameTerm || item.motherName.toLowerCase().includes(nameTerm);
-      const ageMatches = !ageTerm || item.age.toLowerCase().includes(ageTerm);
       const contactMatches = !contactTerm || item.contact.toLowerCase().includes(contactTerm);
       const timeMatches = !timeTerm || item.appointmentTime.toLowerCase().includes(timeTerm);
       const reasonMatches = !reasonTerm || item.reason.toLowerCase().includes(reasonTerm);
       const statusMatches = !statusTerm || item.status.toLowerCase().includes(statusTerm);
-      return nameMatches && ageMatches && contactMatches && timeMatches && reasonMatches && statusMatches;
+      return nameMatches && contactMatches && timeMatches && reasonMatches && statusMatches;
     });
-  }, [appointments, nameFilter, ageFilter, contactFilter, timeFilter, reasonFilter, statusFilter]);
+  }, [appointments, nameFilter, contactFilter, timeFilter, reasonFilter, statusFilter]);
 
   return (
     <main className="main-content">
@@ -655,7 +505,6 @@ export default function DoctorDashboard() {
               <thead>
                 <tr>
                   <th>Mother Name</th>
-                  <th>Age</th>
                   <th>Contact</th>
                   <th>Appointment Time</th>
                   <th>For</th>
@@ -666,9 +515,6 @@ export default function DoctorDashboard() {
                 <tr className="table-filter-row">
                   <th>
                     <input id="doctor-filter-name" className="table-filter-input" value={nameFilter} onChange={(event) => setNameFilter(event.target.value)} placeholder="Search name" />
-                  </th>
-                  <th>
-                    <input id="doctor-filter-age" className="table-filter-input" value={ageFilter} onChange={(event) => setAgeFilter(event.target.value)} placeholder="Age" />
                   </th>
                   <th>
                     <input id="doctor-filter-contact" className="table-filter-input" value={contactFilter} onChange={(event) => setContactFilter(event.target.value)} placeholder="Contact" />
@@ -689,17 +535,16 @@ export default function DoctorDashboard() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={8}>Loading appointments from Firestore...</td>
+                    <td colSpan={6}>Loading appointments from Firestore...</td>
                   </tr>
                 ) : filteredAppointments.length === 0 ? (
                   <tr>
-                    <td colSpan={8}>No appointments found for the selected filter.</td>
+                    <td colSpan={6}>No appointments found for the selected filter.</td>
                   </tr>
                 ) : (
                   filteredAppointments.map((appointment) => (
                     <tr key={appointment.id}>
                       <td>{appointment.motherName}</td>
-                      <td>{appointment.age}</td>
                       <td>{appointment.contact}</td>
                       <td>{appointment.appointmentTime}</td>
                       <td>

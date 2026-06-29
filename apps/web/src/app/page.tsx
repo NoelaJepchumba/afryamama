@@ -15,7 +15,7 @@ import { useAuth } from '@/components/AuthProvider';
 export default function LoginPage() {
   const router = useRouter();
   const { user, role: activeRole, loading: authLoading } = useAuth();
-  const [email, setEmail] = useState('doctor@afryamama.org');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<'DOCTOR' | 'ADMIN'>('DOCTOR');
   const [loading, setLoading] = useState(false);
@@ -34,10 +34,10 @@ export default function LoginPage() {
     }
 
     setRole(selectedRole);
-    if (selectedRole === 'DOCTOR') {
-      setEmail('doctor@afryamama.org');
-    } else {
+    if (selectedRole === 'ADMIN') {
       setEmail('KristieNoela@afyamama.com');
+    } else {
+      setEmail('');
     }
   };
 
