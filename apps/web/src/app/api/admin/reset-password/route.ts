@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
 import { collection, doc, getDocs, limit, query, updateDoc, where } from 'firebase/firestore';
 import { firebaseDb } from '@/lib/firebaseClient';
+import { consumeAdminResetSession } from '@/lib/adminResetStore';
 
 type ResetBody = {
   email?: string;
   newPassword?: string;
   confirmPassword?: string;
+  token?: string;
 };
 
 async function updateAdminPasswordByEmail(email: string, password: string): Promise<boolean> {
@@ -41,9 +43,14 @@ export async function POST(request: Request) {
     const email = (body.email || '').trim().toLowerCase();
     const newPassword = body.newPassword || '';
     const confirmPassword = body.confirmPassword || '';
+    const token = (body.token || '').trim();
 
     if (!email) {
       return NextResponse.json({ message: 'Admin email is required.' }, { status: 400 });
+    }
+
+    if (!token) {
+      return NextResponse.json({ message: 'PIN verification token is required.' }, { status: 401 });
     }
 
     if (!newPassword || !confirmPassword) {
@@ -56,6 +63,11 @@ export async function POST(request: Request) {
 
     if (newPassword !== confirmPassword) {
       return NextResponse.json({ message: 'Passwords do not match.' }, { status: 400 });
+    }
+
+    const validSession = consumeAdminResetSession(email, token);
+    if (!validSession) {
+      return NextResponse.json({ message: 'PIN verification expired. Please verify your PIN again.' }, { status: 401 });
     }
 
     const updated = await updateAdminPasswordByEmail(email, newPassword);

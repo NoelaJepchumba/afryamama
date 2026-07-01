@@ -241,7 +241,6 @@ export default function AdminUsersPage() {
       <div className="header-container">
         <div>
           <h1 className="page-title">User Management</h1>
-          <p className="page-subtitle">Integrated from your legacy admin users module.</p>
         </div>
       </div>
 

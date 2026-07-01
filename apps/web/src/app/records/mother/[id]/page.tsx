@@ -285,7 +285,8 @@ export default function MotherPncPage({ params }: MotherPncPageProps) {
 
     setSaving(true);
     try {
-      const created = await addDoc(collection(firebaseDb, 'pncRecords'), {
+      const visitDateIso = new Date().toISOString();
+      const created = await addDoc(collection(firebaseDb, 'maternalRecords'), {
         motherId: id,
         mother_id: id,
         motherName: record.motherName,
@@ -295,6 +296,9 @@ export default function MotherPncPage({ params }: MotherPncPageProps) {
         visitType: 'PNC',
         type: 'POSTNATAL',
         stage: 'POSTNATAL',
+        checkupDate: visitDateIso,
+        visitDate: visitDateIso,
+        date: visitDateIso,
         weight: Number(form.weight),
         bp: form.bp,
         bloodPressure: form.bp,

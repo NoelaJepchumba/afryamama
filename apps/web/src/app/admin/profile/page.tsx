@@ -203,7 +203,6 @@ export default function AdminProfilePage() {
       <div className="header-container">
         <div>
           <h1 className="page-title">Admin Profile</h1>
-          <p className="page-subtitle">Integrated from your legacy admin profile module.</p>
         </div>
       </div>
 

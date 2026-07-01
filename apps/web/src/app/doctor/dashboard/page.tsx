@@ -483,7 +483,7 @@ export default function DoctorDashboard() {
 
       <div className="content-card">
         <div className="card-header">
-          <span>Create Appointments (Doctor Side)</span>
+          <span>Create Appointments</span>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginBottom: 12 }}>

@@ -174,7 +174,7 @@ export default function AdminReportsPage() {
 
         childrenSnapshot.docs.forEach((docItem) => {
           const data = docItem.data() as Record<string, unknown>;
-          pushCount(childCounts, data.createdAt ?? data.created_at ?? data.date ?? data.birthDate);
+          pushCount(childCounts, data.createdAt ?? data.created_at ?? data.date);
         });
 
         ancSnapshot.docs.forEach((docItem) => {

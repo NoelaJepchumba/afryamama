@@ -193,10 +193,11 @@ export default function MotherDetailsPage({ params }: MotherDetailsPageProps) {
           });
         }
 
-        const [appointmentsSnapshot, maternalSnapshot, pregnanciesSnapshot, childrenSnapshot, childSnapshot, growthSnapshot, immunizationSnapshot] =
+        const [appointmentsSnapshot, maternalSnapshot, pncSnapshot, pregnanciesSnapshot, childrenSnapshot, childSnapshot, growthSnapshot, immunizationSnapshot] =
           await Promise.all([
             getDocs(collection(firebaseDb, 'appointments')),
             getDocs(collection(firebaseDb, 'maternalRecords')),
+            getDocs(collection(firebaseDb, 'pncRecords')),
             getDocs(collection(firebaseDb, 'pregnancies')),
             getDocs(collection(firebaseDb, 'children')),
             getDocs(collection(firebaseDb, 'child')),
@@ -277,6 +278,17 @@ export default function MotherDetailsPage({ params }: MotherDetailsPageProps) {
             status: toLabel(row.status, 'Recorded'),
           }));
 
+        const pncFromRecords = pncSnapshot.docs
+          .map((docItem) => ({ id: docItem.id, ...(docItem.data() as Record<string, unknown>) }))
+          .filter((row) => sameId(row.motherId ?? row.mother_id, id))
+          .map((row) => ({
+            id: row.id,
+            date: toDateLabel(row.checkupDate ?? row.visitDate ?? row.date ?? row.createdAt),
+            source: 'PNC Record',
+            details: toLabel(row.notes ?? row.clinicalObservations ?? row.plan, 'PNC notes'),
+            status: toLabel(row.status, 'Recorded'),
+          }));
+
         const pncFromAppointments = appointmentRows
           .filter((row) => {
             const type = toLabel(row.appointmentType ?? row.type ?? row.reason, '').toUpperCase();
@@ -345,8 +357,8 @@ export default function MotherDetailsPage({ params }: MotherDetailsPageProps) {
             childName: childNames.length ? childNames.join(', ') : '-',
             childDob,
           }));
-          setAncHistory([...ancFromMaternal, ...ancFromAppointments]);
-          setPncHistory([...pncFromMaternal, ...pncFromAppointments]);
+          setAncHistory(ancFromMaternal);
+          setPncHistory([...pncFromMaternal, ...pncFromRecords, ...pncFromAppointments]);
           setChildHistory([...childFromGrowth, ...childFromImmunization]);
         }
       } finally {

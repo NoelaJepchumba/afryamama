@@ -194,7 +194,6 @@ export default function AdminNotificationsPage() {
       <div className="header-container">
         <div>
           <h1 className="page-title">Create Wellness Notification</h1>
-          <p className="page-subtitle">Integrated from your legacy notification workflow.</p>
         </div>
       </div>
 
