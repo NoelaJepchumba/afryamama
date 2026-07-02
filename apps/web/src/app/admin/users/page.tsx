@@ -17,6 +17,12 @@ function normalizeValue(value: string | undefined): string {
   return (value || '').trim().toLowerCase();
 }
 
+function normalizeDoctorStatus(value: unknown): 'Active' | 'Inactive' {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'active' || normalized === 'assigned') return 'Active';
+  return 'Inactive';
+}
+
 function dedupeRows(rows: UserRow[]): UserRow[] {
   const byKey = new Map<string, UserRow>();
 
@@ -99,7 +105,7 @@ export default function AdminUsersPage() {
             email: data.email || '-',
             phone: data.phone || '-',
             facility: data.facility || '-',
-            status: (data.status || 'Inactive').toString(),
+            status: normalizeDoctorStatus(data.status),
           };
         });
 
@@ -132,7 +138,8 @@ export default function AdminUsersPage() {
       const emailMatches = !emailTerm || row.email.toLowerCase().includes(emailTerm);
       const phoneMatches = !phoneTerm || (row.phone || '').toLowerCase().includes(phoneTerm);
       const facilityMatches = !facilityTerm || (row.facility || '').toLowerCase().includes(facilityTerm);
-      const statusMatches = !statusTerm || (row.status || '').toLowerCase().includes(statusTerm);
+      const normalizedRowStatus = normalizeDoctorStatus(row.status).toLowerCase();
+      const statusMatches = !statusTerm || normalizedRowStatus === statusTerm;
       return nameMatches && emailMatches && phoneMatches && facilityMatches && statusMatches;
     });
   }, [rows, nameFilter, emailFilter, phoneFilter, facilityFilter, statusFilter]);
@@ -163,21 +170,16 @@ export default function AdminUsersPage() {
       });
 
       let sentCode = false;
-      let sendCodeErrorMessage = '';
       try {
         const response = await fetch('/api/clinician-activation/send-link', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: doctorEmail.trim().toLowerCase() }),
         });
-        const payload = (await response.json()) as { message?: string };
+        await response.json();
         sentCode = response.ok;
-        if (!response.ok) {
-          sendCodeErrorMessage = payload.message || 'Activation email could not be sent.';
-        }
       } catch {
         sentCode = false;
-        sendCodeErrorMessage = 'Activation email request failed. Please check network/server status.';
       }
 
       setDoctors((prev) => dedupeRows([
@@ -197,13 +199,9 @@ export default function AdminUsersPage() {
       setDoctorEmail('');
       setDoctorPhone('');
       setDoctorFacility('');
-      setDoctorMessage(
-        sentCode
-          ? 'Clinician added as Inactive. Activation link sent to clinician email.'
-          : 'Clinician added as Inactive, but activation link email could not be sent.'
-      );
-      if (!sentCode && sendCodeErrorMessage) {
-        setDoctorError(sendCodeErrorMessage);
+      setDoctorMessage('Added clinician.');
+      if (!sentCode) {
+        console.warn('Clinician activation link email could not be sent.');
       }
     } catch {
       setDoctorError('Could not add clinician. Please try again.');
@@ -357,13 +355,26 @@ export default function AdminUsersPage() {
                   />
                 </th>
                 <th>
-                  <input
-                    id="users-filter-status"
-                    className="table-filter-input"
-                    value={statusFilter}
-                    onChange={(event) => setStatusFilter(event.target.value)}
-                    placeholder="Search status"
-                  />
+                  {role === 'doctor' ? (
+                    <select
+                      id="users-filter-status"
+                      className="table-filter-input"
+                      value={statusFilter}
+                      onChange={(event) => setStatusFilter(event.target.value)}
+                    >
+                      <option value="">All statuses</option>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  ) : (
+                    <input
+                      id="users-filter-status"
+                      className="table-filter-input"
+                      value={statusFilter}
+                      onChange={(event) => setStatusFilter(event.target.value)}
+                      placeholder="Search status"
+                    />
+                  )}
                 </th>
                 {role === 'doctor' ? <th /> : null}
               </tr>
@@ -385,9 +396,15 @@ export default function AdminUsersPage() {
                     <td>{row.phone || '-'}</td>
                     <td>{row.facility || '-'}</td>
                     <td>
-                      <span className={`badge ${String(row.status || '').toLowerCase() === 'active' ? 'badge-success' : 'badge-warning'}`}>
-                        {row.status || 'Inactive'}
-                      </span>
+                      {role === 'doctor' ? (
+                        <span className={`badge ${normalizeDoctorStatus(row.status) === 'Active' ? 'badge-success' : 'badge-warning'}`}>
+                          {normalizeDoctorStatus(row.status)}
+                        </span>
+                      ) : (
+                        <span className={`badge ${String(row.status || '').toLowerCase() === 'active' ? 'badge-success' : 'badge-warning'}`}>
+                          {row.status || 'Inactive'}
+                        </span>
+                      )}
                     </td>
                     {role === 'doctor' ? (
                       <td>

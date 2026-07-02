@@ -6,6 +6,7 @@ import { firebaseDb } from '@/lib/firebaseClient';
 
 type Series = { name: string; color: string; values: number[] };
 type GraphModel = { id: string; title: string; subtitle: string; labels: string[]; series: Series[] };
+type SummaryMetric = { label: string; value: string; detail: string };
 
 function asLabel(value: unknown, fallback = ''): string {
   if (typeof value === 'string') return value.trim() || fallback;
@@ -60,6 +61,42 @@ function emptyCounts(keys: string[]): Record<string, number> {
     acc[key] = 0;
     return acc;
   }, {});
+}
+
+function escapeCsv(value: unknown): string {
+  const text = String(value ?? '');
+  const escaped = text.replace(/"/g, '""');
+  return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
+}
+
+function downloadReportsCsv(filename: string, graphs: GraphModel[], summary: SummaryMetric[]) {
+  const lines: string[] = [];
+
+  lines.push('AfyaMama Admin Report Summary');
+  lines.push('Metric,Value,Detail');
+  summary.forEach((item) => {
+    lines.push([escapeCsv(item.label), escapeCsv(item.value), escapeCsv(item.detail)].join(','));
+  });
+
+  graphs.forEach((graph) => {
+    lines.push('');
+    lines.push(escapeCsv(graph.title));
+    lines.push(escapeCsv(graph.subtitle));
+    lines.push(['Month', ...graph.series.map((line) => line.name)].map(escapeCsv).join(','));
+
+    graph.labels.forEach((label, index) => {
+      const row = [label, ...graph.series.map((line) => line.values[index] ?? 0)];
+      lines.push(row.map(escapeCsv).join(','));
+    });
+  });
+
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function LineChart({ graph }: { graph: GraphModel }) {
@@ -138,6 +175,7 @@ function LineChart({ graph }: { graph: GraphModel }) {
 export default function AdminReportsPage() {
   const [graphs, setGraphs] = useState<GraphModel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [summaryMetrics, setSummaryMetrics] = useState<SummaryMetric[]>([]);
 
   useEffect(() => {
     async function loadReports() {
@@ -244,6 +282,47 @@ export default function AdminReportsPage() {
         ];
 
         setGraphs(nextGraphs);
+
+        const currentKey = keys[keys.length - 1];
+        const totalAnc = keys.reduce((sum, key) => sum + ancCounts[key], 0);
+        const totalPnc = keys.reduce((sum, key) => sum + pncCounts[key], 0);
+        const totalMothers = keys.reduce((sum, key) => sum + motherCounts[key], 0);
+        const totalChildren = keys.reduce((sum, key) => sum + childCounts[key], 0);
+        const totalAppointments = keys.reduce((sum, key) => sum + appointmentCounts[key], 0);
+        const totalNotifications = keys.reduce((sum, key) => sum + notificationCounts[key], 0);
+
+        setSummaryMetrics([
+          {
+            label: 'ANC Visits (6 months)',
+            value: String(totalAnc),
+            detail: `${ancCounts[currentKey]} in ${toMonthLabel(currentKey)}`,
+          },
+          {
+            label: 'PNC Visits (6 months)',
+            value: String(totalPnc),
+            detail: `${pncCounts[currentKey]} in ${toMonthLabel(currentKey)}`,
+          },
+          {
+            label: 'Mother Registrations',
+            value: String(totalMothers),
+            detail: `${motherCounts[currentKey]} added in latest month`,
+          },
+          {
+            label: 'Child Registrations',
+            value: String(totalChildren),
+            detail: `${childCounts[currentKey]} added in latest month`,
+          },
+          {
+            label: 'Appointments Logged',
+            value: String(totalAppointments),
+            detail: `${appointmentCounts[currentKey]} logged in latest month`,
+          },
+          {
+            label: 'Notifications Sent',
+            value: String(totalNotifications),
+            detail: `${notificationCounts[currentKey]} sent in latest month`,
+          },
+        ]);
       } finally {
         setLoading(false);
       }
@@ -261,9 +340,32 @@ export default function AdminReportsPage() {
           <h1 className="page-title">System Reports</h1>
           <p className="page-subtitle">All report views are rendered as line graphs, including ANC and PNC.</p>
         </div>
+        <button
+          className="btn btn-primary"
+          onClick={() => downloadReportsCsv('admin-reports.csv', graphs, summaryMetrics)}
+          disabled={loading || graphs.length === 0}
+        >
+          Download CSV
+        </button>
       </div>
 
-      {loading ? <div className="content-card">Loading reports from Firestore...</div> : graphViews}
+      {loading ? <div className="content-card">Loading reports from Firestore...</div> : (
+        <>
+          <div
+            className="content-card"
+            style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}
+          >
+            {summaryMetrics.map((item) => (
+              <div key={item.label} style={{ border: '1px solid var(--border-color)', borderRadius: 10, padding: 12 }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{item.label}</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--primary-color)' }}>{item.value}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{item.detail}</div>
+              </div>
+            ))}
+          </div>
+          {graphViews}
+        </>
+      )}
     </main>
   );
 }
