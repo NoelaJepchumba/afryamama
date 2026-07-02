@@ -22,6 +22,7 @@ export default function AdminLteDashboardShell({ role, allowedRoles, children }:
   const router = useRouter();
   const pathname = usePathname();
   const [resolvedName, setResolvedName] = useState<string>('');
+  const [pendingEmergencyCount, setPendingEmergencyCount] = useState(0);
   const effectiveRole = authenticatedRole ?? role;
   const resolvedAllowedRoles = allowedRoles ?? [role];
   const menuItems = effectiveRole === 'ADMIN' ? adminMenuItems : doctorMenuItems;
@@ -144,6 +145,39 @@ export default function AdminLteDashboardShell({ role, allowedRoles, children }:
   }, []);
 
   useEffect(() => {
+    const replaceShortcutText = () => {
+      const header = document.querySelector('.app-header');
+      if (!header) return;
+
+      const candidates = header.querySelectorAll('kbd, .kbd, [class*="shortcut"], [class*="command"], [aria-label*="search" i], button, span');
+      candidates.forEach((node) => {
+        const element = node as HTMLElement;
+        const text = (element.textContent || '').trim();
+        if (!text) return;
+
+        const hasMacShortcut =
+          text.includes('⌘') ||
+          /command\s*\+\s*k/i.test(text) ||
+          /cmd\s*\+\s*k/i.test(text);
+
+        if (hasMacShortcut) {
+          element.textContent = text
+            .replace(/⌘\s*K/gi, 'Ctrl + K')
+            .replace(/Command\s*\+\s*K/gi, 'Ctrl + K')
+            .replace(/Cmd\s*\+\s*K/gi, 'Ctrl + K');
+        }
+      });
+    };
+
+    replaceShortcutText();
+    const id = window.setInterval(replaceShortcutText, 1500);
+
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [pathname]);
+
+  useEffect(() => {
     if (!pathname) return;
     if (effectiveRole !== 'DOCTOR' && effectiveRole !== 'ADMIN') return;
 
@@ -193,10 +227,65 @@ export default function AdminLteDashboardShell({ role, allowedRoles, children }:
     };
   }, [effectiveRole, pathname, router]);
 
+  useEffect(() => {
+    async function loadPendingEmergencyCount() {
+      if (effectiveRole !== 'DOCTOR') {
+        setPendingEmergencyCount(0);
+        return;
+      }
+
+      try {
+        const appointmentsSnap = await getDocs(collection(firebaseDb, 'appointments'));
+        const count = appointmentsSnap.docs.filter((docItem) => {
+          const data = docItem.data() as Record<string, unknown>;
+          const source = (typeof data.source === 'string' ? data.source : '').trim().toUpperCase();
+          const requestType = (typeof data.requestType === 'string' ? data.requestType : '').trim().toUpperCase();
+          const reason = (
+            typeof data.reason === 'string'
+              ? data.reason
+              : typeof data.notes === 'string'
+                ? data.notes
+                : typeof data.type === 'string'
+                  ? data.type
+                  : ''
+          )
+            .trim()
+            .toLowerCase();
+          const status = (typeof data.status === 'string' ? data.status : 'PENDING').trim().toUpperCase();
+
+          const isEmergency =
+            source === 'MOTHER_EMERGENCY_REQUEST' || requestType === 'EMERGENCY' || reason.includes('emergency');
+
+          return isEmergency && status === 'PENDING';
+        }).length;
+
+        setPendingEmergencyCount(count);
+      } catch {
+        setPendingEmergencyCount(0);
+      }
+    }
+
+    loadPendingEmergencyCount();
+  }, [effectiveRole, pathname]);
+
+  const displayedMenuItems =
+    effectiveRole !== 'DOCTOR'
+      ? menuItems
+      : menuItems.map((item) => {
+          if (item.type === 'item' && item.href === '/doctor/emergency') {
+            const suffix = pendingEmergencyCount > 0 ? ` (${pendingEmergencyCount})` : '';
+            return {
+              ...item,
+              text: `Emergency Requests${suffix}`,
+            };
+          }
+          return item;
+        });
+
   return (
     <RoleGuard allowedRoles={resolvedAllowedRoles}>
       <DashboardLayout
-        menuItems={menuItems}
+        menuItems={displayedMenuItems}
         logo={<span style={{ fontWeight: 700, letterSpacing: '0.02em' }}>AfyaMama</span>}
         sidebarTheme="light"
         fixedHeader

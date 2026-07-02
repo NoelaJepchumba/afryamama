@@ -132,6 +132,11 @@ body {
   color: var(--text-primary);
 }
 
+.app-footer,
+.main-footer {
+  display: none !important;
+}
+
 .app-header {
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);

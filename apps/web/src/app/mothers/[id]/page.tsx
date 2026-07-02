@@ -94,6 +94,24 @@ function parseDate(value: unknown): Date | null {
   return null;
 }
 
+function parsePositiveNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+  if (typeof value === 'string') {
+    const match = value.match(/\d+(?:\.\d+)?/);
+    if (!match) return null;
+    const parsed = Number(match[0]);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+}
+
+function computeEddFromWeeksAtDate(gestWeeks: number | null, visitDate: Date | null): string {
+  if (!gestWeeks || !visitDate) return '-';
+  const remainingWeeks = Math.max(0, 40 - gestWeeks);
+  const due = new Date(visitDate.getTime() + remainingWeeks * 7 * 24 * 60 * 60 * 1000);
+  return due.toISOString().slice(0, 10);
+}
+
 function computeEddFromLmp(data: Record<string, unknown>): string {
   const lmp = parseDate(data.lmp ?? data.lmpDate ?? data.lastMenstrualPeriod ?? data.last_menstrual_period);
   if (!lmp) return '-';
@@ -114,18 +132,29 @@ function computeEddFromGestation(
   ];
 
   for (const row of ancCandidates) {
-    const gestWeeksRaw = row.gestationWeeks ?? row.gestation ?? row.weeks;
-    const gestWeeks = typeof gestWeeksRaw === 'number' ? gestWeeksRaw : Number(gestWeeksRaw);
-    const visitDate = parseDate(row.visitDate ?? row.date ?? row.dateTime ?? row.createdAt);
+    const gestWeeks = parsePositiveNumber(
+      row.gestationWeeks ?? row.gestation ?? row.weeks ?? row.pregnancyWeek ?? row.pregnancyWeeks ?? row.gestationalAge
+    );
+    const visitDate = parseDate(
+      row.checkupDate ?? row.visitDate ?? row.recordedDate ?? row.date ?? row.dateTime ?? row.createdAt
+    );
 
-    if (!Number.isNaN(gestWeeks) && gestWeeks > 0 && visitDate) {
-      const remainingWeeks = Math.max(0, 40 - gestWeeks);
-      const due = new Date(visitDate.getTime() + remainingWeeks * 7 * 24 * 60 * 60 * 1000);
-      return due.toISOString().slice(0, 10);
-    }
+    const computed = computeEddFromWeeksAtDate(gestWeeks, visitDate);
+    if (computed !== '-') return computed;
   }
 
   return '-';
+}
+
+function computeEddFromMotherGestation(data: Record<string, unknown>): string {
+  const gestWeeks = parsePositiveNumber(
+    data.gestationWeeks ?? data.gestation ?? data.pregnancyWeek ?? data.pregnancyWeeks ?? data.week ?? data.gestationalAge
+  );
+  const anchorDate =
+    parseDate(data.updatedAt) ||
+    parseDate(data.createdAt) ||
+    new Date();
+  return computeEddFromWeeksAtDate(gestWeeks, anchorDate);
 }
 
 function computeEddFromPregnancies(pregnancyRows: Array<Record<string, unknown>>): string {
@@ -232,6 +261,9 @@ export default function MotherDetailsPage({ params }: MotherDetailsPageProps) {
 
           const fromLmp = computeEddFromLmp(motherData);
           if (fromLmp !== '-') return fromLmp;
+
+          const fromMotherGestation = computeEddFromMotherGestation(motherData);
+          if (fromMotherGestation !== '-') return fromMotherGestation;
 
           const fromPregnancy = computeEddFromPregnancies(pregnancyRows);
           if (fromPregnancy !== '-') return fromPregnancy;

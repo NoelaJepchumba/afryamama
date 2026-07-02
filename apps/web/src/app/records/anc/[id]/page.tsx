@@ -3,8 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { addDoc, collection, doc, getDoc, getDocs } from 'firebase/firestore';
-import { firebaseDb } from '@/lib/firebaseClient';
+import { addDoc, collection, doc, getDoc, getDocs, limit, query, where, firebaseDb } from '@/lib/firebaseClient';
 import { useAuth } from '@/components/AuthProvider';
 
 interface AncDetailsPageProps {
@@ -20,7 +19,6 @@ interface MotherInfo {
 
 interface AncVisitRow {
   id: string;
-  contact: string;
   date: string;
   bp: string;
   fhr: string;
@@ -28,7 +26,6 @@ interface AncVisitRow {
 }
 
 interface AncFormState {
-  contactNo: string;
   date: string;
   gestationWeeks: string;
   facility: string;
@@ -48,7 +45,6 @@ interface AncFormState {
 }
 
 const defaultFormState: AncFormState = {
-  contactNo: '',
   date: '',
   gestationWeeks: '',
   facility: '',
@@ -80,6 +76,48 @@ function resolveMotherName(data: Record<string, unknown>): string {
   return readText(data.fullName || data.full_name || data.name || data.displayName, fullFromSplit || 'Unknown Mother');
 }
 
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeEmail(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function parseGestationWeeks(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 0 ? value : null;
+  }
+
+  if (typeof value === 'string') {
+    const match = value.match(/\d+(?:\.\d+)?/);
+    if (!match) return null;
+    const parsed = Number(match[0]);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  return null;
+}
+
+function computeEddFromGestationWeeks(weeks: number | null): string {
+  if (!weeks || !Number.isFinite(weeks)) return '-';
+
+  const remainingWeeks = Math.max(0, 40 - weeks);
+  const dueDate = new Date(Date.now() + remainingWeeks * 7 * 24 * 60 * 60 * 1000);
+  return dueDate.toISOString().slice(0, 10);
+}
+
+function computeGestationFromDate(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+
+  const days = Math.floor((Date.now() - parsed.getTime()) / (1000 * 60 * 60 * 24));
+  if (days < 0) return '';
+  const weeks = Math.max(1, Math.floor(days / 7));
+  return String(weeks);
+}
+
 export default function AncDetailsPage({ params }: AncDetailsPageProps) {
   const { user } = useAuth();
   const [motherId, setMotherId] = useState('');
@@ -89,6 +127,8 @@ export default function AncDetailsPage({ params }: AncDetailsPageProps) {
   const [portalReady, setPortalReady] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState<AncFormState>(defaultFormState);
+  const [motherGestationWeeks, setMotherGestationWeeks] = useState('');
+  const [doctorFacility, setDoctorFacility] = useState('');
   const [mother, setMother] = useState<MotherInfo>({
     name: 'Unknown Mother',
     phone: '-',
@@ -117,12 +157,25 @@ export default function AncDetailsPage({ params }: AncDetailsPageProps) {
         if (motherSource.exists()) {
           const data = motherSource.data() as Record<string, unknown>;
           const gestationValue = readText(data.gestation || data.gestationWeeks || data.pregnancyWeek || data.week, '');
+          const gestationFromDate =
+            computeGestationFromDate(data.lmp || data.lmpDate || data.lastMenstrualPeriod || data.last_menstrual_period) ||
+            computeGestationFromDate(data.pregnancyStartDate || data.startDate || data.createdAt);
+          const resolvedGestation = gestationValue || gestationFromDate;
+          const gestationWeeksNumber =
+            parseGestationWeeks(data.gestationWeeks) ||
+            parseGestationWeeks(data.gestation) ||
+            parseGestationWeeks(data.pregnancyWeek) ||
+            parseGestationWeeks(data.week) ||
+            parseGestationWeeks(resolvedGestation);
+          const storedEdd = readText(data.expectedDeliveryDate || data.edd || data.deliveryDate, '');
+          const computedEdd = computeEddFromGestationWeeks(gestationWeeksNumber);
+          setMotherGestationWeeks(resolvedGestation);
 
           setMother({
             name: resolveMotherName(data),
             phone: readText(data.phone || data.phoneNumber, '-'),
-            gestation: gestationValue ? `${gestationValue} weeks` : '-',
-            expectedDelivery: readText(data.expectedDeliveryDate || data.edd || data.deliveryDate, '-'),
+            gestation: resolvedGestation ? `${resolvedGestation} weeks` : '-',
+            expectedDelivery: storedEdd || computedEdd || '-',
           });
         }
 
@@ -137,7 +190,6 @@ export default function AncDetailsPage({ params }: AncDetailsPageProps) {
           })
           .map((item: any) => ({
             id: item.id,
-            contact: item.contactNo || item.contact || 'ANC Contact',
             date: item.checkupDate || item.date || '-',
             bp: item.bp || item.bloodPressure || '-',
             fhr: item.fhr ? `${item.fhr} bpm` : item.fetalHeartRate ? `${item.fetalHeartRate} bpm` : '-',
@@ -161,6 +213,68 @@ export default function AncDetailsPage({ params }: AncDetailsPageProps) {
     setPortalReady(true);
   }, []);
 
+  useEffect(() => {
+    async function loadDoctorFacility() {
+      if (!user?.email) return;
+
+      const doctorEmail = user.email.trim().toLowerCase();
+      const [doctorsSnapshot, doctorsCapsSnapshot] = await Promise.all([
+        getDocs(query(collection(firebaseDb, 'doctors'), where('email', '==', doctorEmail), limit(1))),
+        getDocs(query(collection(firebaseDb, 'Doctors'), where('email', '==', doctorEmail), limit(1))),
+      ]);
+
+      let docData: Record<string, unknown> | null = null;
+      if (!doctorsSnapshot.empty) {
+        docData = doctorsSnapshot.docs[0].data() as Record<string, unknown>;
+      } else if (!doctorsCapsSnapshot.empty) {
+        docData = doctorsCapsSnapshot.docs[0].data() as Record<string, unknown>;
+      } else {
+        const [allDoctorsSnapshot, allDoctorsCapsSnapshot] = await Promise.all([
+          getDocs(collection(firebaseDb, 'doctors')),
+          getDocs(collection(firebaseDb, 'Doctors')),
+        ]);
+
+        const combined = [...allDoctorsSnapshot.docs, ...allDoctorsCapsSnapshot.docs];
+        const matched = combined.find((item) => {
+          const data = item.data() as Record<string, unknown>;
+          const candidateEmail = normalizeEmail(data.email || data.Email || data.userEmail || data.user_email);
+          const candidateUid = readText(data.uid || data.userId || data.user_id || data.firebaseUid, '');
+          return candidateEmail === doctorEmail || (user.uid && candidateUid === user.uid);
+        });
+
+        if (matched) {
+          docData = matched.data() as Record<string, unknown>;
+        }
+      }
+
+      if (!docData) return;
+
+      const facility = readText(
+        docData.facility ||
+          docData.hospital ||
+          docData.healthFacility ||
+          docData.healthCenter ||
+          docData.health_centre,
+        ''
+      );
+      if (facility) {
+        setDoctorFacility(facility);
+      }
+    }
+
+    loadDoctorFacility();
+  }, [user?.email, user?.uid]);
+
+  useEffect(() => {
+    if (!showForm) return;
+    setForm((prev) => ({
+      ...prev,
+      date: todayIsoDate(),
+      gestationWeeks: prev.gestationWeeks || motherGestationWeeks,
+      facility: prev.facility || doctorFacility,
+    }));
+  }, [doctorFacility, motherGestationWeeks, showForm]);
+
   async function saveAncVisit(event: React.FormEvent) {
     event.preventDefault();
     setError('');
@@ -170,7 +284,7 @@ export default function AncDetailsPage({ params }: AncDetailsPageProps) {
       return;
     }
 
-    if (!form.contactNo || !form.date || !form.gestationWeeks || !form.bp || !form.fhr) {
+    if (!form.date || !form.gestationWeeks || !form.bp || !form.fhr) {
       setError('Please fill all required fields.');
       return;
     }
@@ -186,7 +300,6 @@ export default function AncDetailsPage({ params }: AncDetailsPageProps) {
         visitType: 'ANC',
         recordType: 'ANC',
         type: 'ANC',
-        contactNo: form.contactNo,
         checkupDate: form.date,
         date: form.date,
         gestationWeeks: Number(form.gestationWeeks),
@@ -219,7 +332,7 @@ export default function AncDetailsPage({ params }: AncDetailsPageProps) {
           doctorUid: user?.uid || '',
           appointmentType: 'ANC FOLLOW-UP',
           type: 'ANC',
-          reason: `ANC follow-up (${form.contactNo})`,
+          reason: 'ANC follow-up visit',
           status: 'PENDING',
           date: form.nextVisit,
           dateTime: form.nextVisit,
@@ -231,7 +344,6 @@ export default function AncDetailsPage({ params }: AncDetailsPageProps) {
       setVisits((prev) => [
         {
           id: created.id,
-          contact: form.contactNo,
           date: form.date,
           bp: form.bp,
           fhr: `${form.fhr} bpm`,
@@ -240,7 +352,12 @@ export default function AncDetailsPage({ params }: AncDetailsPageProps) {
         ...prev,
       ]);
 
-      setForm(defaultFormState);
+      setForm({
+        ...defaultFormState,
+        date: todayIsoDate(),
+        gestationWeeks: motherGestationWeeks,
+        facility: doctorFacility,
+      });
       setShowForm(false);
     } catch {
       setError('Failed to save ANC visit. Please try again.');
@@ -287,7 +404,6 @@ export default function AncDetailsPage({ params }: AncDetailsPageProps) {
           <table className="custom-table">
             <thead>
               <tr>
-                <th>Contact</th>
                 <th>Date</th>
                 <th>BP</th>
                 <th>FHR</th>
@@ -297,16 +413,15 @@ export default function AncDetailsPage({ params }: AncDetailsPageProps) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={5}>Loading ANC visits...</td>
+                  <td colSpan={4}>Loading ANC visits...</td>
                 </tr>
               ) : visits.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>No ANC records found for this mother.</td>
+                  <td colSpan={4}>No ANC records found for this mother.</td>
                 </tr>
               ) : (
                 visits.map((visit) => (
                   <tr key={visit.id}>
-                    <td>{visit.contact}</td>
                     <td>{visit.date}</td>
                     <td>{visit.bp}</td>
                     <td>{visit.fhr}</td>
@@ -355,30 +470,16 @@ export default function AncDetailsPage({ params }: AncDetailsPageProps) {
             <form onSubmit={saveAncVisit}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div className="form-group">
-                  <label className="form-label">Contact No. *</label>
-                  <select className="form-input" value={form.contactNo} onChange={(e) => setForm((p) => ({ ...p, contactNo: e.target.value }))} required>
-                    <option value="">Select...</option>
-                    <option value="1st Contact">1st Contact</option>
-                    <option value="2nd Contact">2nd Contact</option>
-                    <option value="3rd Contact">3rd Contact</option>
-                    <option value="4th Contact">4th Contact</option>
-                    <option value="5th Contact">5th Contact</option>
-                    <option value="6th Contact">6th Contact</option>
-                    <option value="7th Contact">7th Contact</option>
-                    <option value="8th+ Contact">8th+ Contact</option>
-                  </select>
-                </div>
-                <div className="form-group">
                   <label className="form-label">Date *</label>
-                  <input className="form-input" type="date" value={form.date} onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))} required />
+                  <input className="form-input" type="date" value={form.date} readOnly required />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Gestation (weeks) *</label>
-                  <input className="form-input" type="number" min={4} max={42} value={form.gestationWeeks} onChange={(e) => setForm((p) => ({ ...p, gestationWeeks: e.target.value }))} required />
+                  <input className="form-input" type="number" min={4} max={42} value={form.gestationWeeks} readOnly required />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Facility / Health Centre</label>
-                  <input className="form-input" value={form.facility} onChange={(e) => setForm((p) => ({ ...p, facility: e.target.value }))} />
+                  <input className="form-input" value={form.facility} readOnly />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Weight (kg)</label>

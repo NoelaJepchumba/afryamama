@@ -60,7 +60,7 @@ function dedupeRows(rows: MotherRow[]): MotherRow[] {
 export default function MothersPage() {
   const [nameFilter, setNameFilter] = useState('');
   const [phoneFilter, setPhoneFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PRENATAL' | 'POSTNATAL'>('ALL');
   const [locationFilter, setLocationFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [mothers, setMothers] = useState<MotherRow[]>([]);
@@ -105,19 +105,22 @@ export default function MothersPage() {
   const filteredMothers = useMemo(() => {
     const nameTerm = nameFilter.trim().toLowerCase();
     const phoneTerm = phoneFilter.trim().toLowerCase();
-    const statusTerm = statusFilter.trim().toLowerCase();
     const locationTerm = locationFilter.trim().toLowerCase();
 
-    if (!nameTerm && !phoneTerm && !statusTerm && !locationTerm) {
+    if (!nameTerm && !phoneTerm && !locationTerm && statusFilter === 'ALL') {
       return mothers;
     }
 
     return mothers.filter((m) => {
       const nameMatches = !nameTerm || m.name.toLowerCase().includes(nameTerm);
       const phoneMatches = !phoneTerm || m.phone.toLowerCase().includes(phoneTerm);
-      const statusMatches = !statusTerm || m.status.toLowerCase().includes(statusTerm);
       const locationMatches = !locationTerm || m.location.toLowerCase().includes(locationTerm);
-      return nameMatches && phoneMatches && statusMatches && locationMatches;
+      const normalizedStatus = m.status.toUpperCase();
+      const statusMatches =
+        statusFilter === 'ALL' ||
+        (statusFilter === 'PRENATAL' && (normalizedStatus.includes('PRENATAL') || normalizedStatus.includes('PREG'))) ||
+        (statusFilter === 'POSTNATAL' && (normalizedStatus.includes('POSTNATAL') || normalizedStatus.includes('PNC')));
+      return nameMatches && phoneMatches && locationMatches && statusMatches;
     });
   }, [
     mothers,
@@ -162,7 +165,11 @@ export default function MothersPage() {
                     <input className="table-filter-input" placeholder="Location" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} />
                   </th>
                   <th>
-                    <input className="table-filter-input" placeholder="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} />
+                    <select className="table-filter-input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as 'ALL' | 'PRENATAL' | 'POSTNATAL')}>
+                      <option value="ALL">All Statuses</option>
+                      <option value="PRENATAL">Prenatal</option>
+                      <option value="POSTNATAL">Postnatal</option>
+                    </select>
                   </th>
                   <th />
                 </tr>
