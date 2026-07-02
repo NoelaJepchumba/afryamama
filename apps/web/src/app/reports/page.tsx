@@ -17,6 +17,12 @@ type ChartModel = {
   series: Series[];
 };
 
+type SummaryMetric = {
+  label: string;
+  value: string;
+  detail: string;
+};
+
 function asLabel(value: unknown, fallback = ''): string {
   if (typeof value === 'string') return value.trim() || fallback;
   if (typeof value === 'number') return String(value);
@@ -81,6 +87,96 @@ function emptyCounts(keys: string[]): Record<string, number> {
   }, {});
 }
 
+function escapeCsv(value: unknown): string {
+  const text = String(value ?? '');
+  const escaped = text.replace(/"/g, '""');
+  return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
+}
+
+function downloadReportsCsv(filename: string, charts: ChartModel[], summary: SummaryMetric[]) {
+  const lines: string[] = [];
+
+  lines.push('AfyaMama Report Summary');
+  lines.push('Metric,Value,Detail');
+  summary.forEach((item) => {
+    lines.push([escapeCsv(item.label), escapeCsv(item.value), escapeCsv(item.detail)].join(','));
+  });
+
+  charts.forEach((chart) => {
+    lines.push('');
+    lines.push(escapeCsv(chart.title));
+    lines.push(escapeCsv(chart.subtitle));
+    lines.push(['Month', ...chart.series.map((line) => line.name)].map(escapeCsv).join(','));
+
+    chart.labels.forEach((label, index) => {
+      const row = [label, ...chart.series.map((line) => line.values[index] ?? 0)];
+      lines.push(row.map(escapeCsv).join(','));
+    });
+  });
+
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadSvgAsPng(svgElement: SVGSVGElement, filename: string) {
+  const serializer = new XMLSerializer();
+  const cloned = svgElement.cloneNode(true) as SVGSVGElement;
+
+  // Ensure exported text colors are preserved outside the app CSS context.
+  cloned.querySelectorAll('text').forEach((node) => {
+    node.setAttribute('fill', '#64748b');
+  });
+
+  const source = serializer.serializeToString(cloned);
+  const svgBlob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(svgBlob);
+
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = url;
+    });
+
+    const viewWidth = Number(svgElement.viewBox.baseVal.width) || 760;
+    const viewHeight = Number(svgElement.viewBox.baseVal.height) || 240;
+    const canvas = document.createElement('canvas');
+    canvas.width = viewWidth;
+    canvas.height = viewHeight;
+
+    const context = canvas.getContext('2d');
+    if (!context) return;
+
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    const pngUrl = canvas.toDataURL('image/png');
+    const anchor = document.createElement('a');
+    anchor.href = pngUrl;
+    anchor.download = filename;
+    anchor.click();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function downloadAllChartsAsPng(charts: ChartModel[]) {
+  for (const chart of charts) {
+    const svg = document.querySelector<SVGSVGElement>(`svg[data-chart-id="${chart.id}"]`);
+    if (!svg) continue;
+
+    const safeName = chart.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    await downloadSvgAsPng(svg, `${safeName || chart.id}.png`);
+  }
+}
+
 function LineChart({ chart }: { chart: ChartModel }) {
   const width = 760;
   const height = 240;
@@ -103,7 +199,13 @@ function LineChart({ chart }: { chart: ChartModel }) {
       </div>
       <p style={{ color: 'var(--text-secondary)', marginBottom: 14 }}>{chart.subtitle}</p>
 
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto' }} role="img" aria-label={chart.title}>
+      <svg
+        data-chart-id={chart.id}
+        viewBox={`0 0 ${width} ${height}`}
+        style={{ width: '100%', height: 'auto' }}
+        role="img"
+        aria-label={chart.title}
+      >
         {Array.from({ length: 5 }, (_, i) => {
           const y = paddingY + ((height - paddingY * 2) * i) / 4;
           return (
@@ -135,7 +237,7 @@ function LineChart({ chart }: { chart: ChartModel }) {
           const xSpan = width - paddingX * 2;
           const x = paddingX + (xSpan * index) / Math.max(chart.labels.length - 1, 1);
           return (
-            <text key={`${chart.id}-${label}`} x={x} y={height - 4} textAnchor="middle" fontSize="11" fill="var(--text-muted)">
+            <text key={`${chart.id}-${label}`} x={x} y={height - 4} textAnchor="middle" fontSize="11" fill="#64748b">
               {label}
             </text>
           );
@@ -157,6 +259,7 @@ function LineChart({ chart }: { chart: ChartModel }) {
 export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [charts, setCharts] = useState<ChartModel[]>([]);
+  const [summaryMetrics, setSummaryMetrics] = useState<SummaryMetric[]>([]);
 
   useEffect(() => {
     let isMounted = true;
@@ -306,6 +409,40 @@ export default function ReportsPage() {
 
         if (isMounted) {
           setCharts(chartsData);
+          const currentKey = keys[keys.length - 1];
+          const totalAnc = keys.reduce((sum, key) => sum + ancCounts[key], 0);
+          const totalPnc = keys.reduce((sum, key) => sum + pncCounts[key], 0);
+          const totalAppointments = keys.reduce((sum, key) => sum + appointmentCounts[key], 0);
+          const totalImmunizations = keys.reduce((sum, key) => sum + immunizationCounts[key], 0);
+          const totalHighRisk = keys.reduce((sum, key) => sum + highRiskCounts[key], 0);
+
+          setSummaryMetrics([
+            {
+              label: 'Total ANC Visits (6 months)',
+              value: String(totalAnc),
+              detail: `${ancCounts[currentKey]} recorded in ${toMonthLabel(currentKey)}`,
+            },
+            {
+              label: 'Total PNC Visits (6 months)',
+              value: String(totalPnc),
+              detail: `${pncCounts[currentKey]} recorded in ${toMonthLabel(currentKey)}`,
+            },
+            {
+              label: 'Appointments Logged',
+              value: String(totalAppointments),
+              detail: `${appointmentCounts[currentKey]} in the latest month`,
+            },
+            {
+              label: 'Completed Immunizations',
+              value: String(totalImmunizations),
+              detail: `${immunizationCounts[currentKey]} completed in the latest month`,
+            },
+            {
+              label: 'High-Risk Referrals',
+              value: String(totalHighRisk),
+              detail: `${highRiskCounts[currentKey]} identified in the latest month`,
+            },
+          ]);
         }
       } finally {
         if (isMounted) setLoading(false);
@@ -328,9 +465,41 @@ export default function ReportsPage() {
           <h1 className="page-title">Health Reports & Analytics</h1>
           <p className="page-subtitle">All report outputs are shown as line graphs, including ANC and PNC trends.</p>
         </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => void downloadAllChartsAsPng(charts)}
+            disabled={loading || charts.length === 0}
+          >
+            Download Charts (PNG)
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() => downloadReportsCsv('doctor-reports.csv', charts, summaryMetrics)}
+            disabled={loading || charts.length === 0}
+          >
+            Download CSV
+          </button>
+        </div>
       </div>
 
-      {loading ? <div className="content-card">Loading report analytics from Firestore...</div> : chartViews}
+      {loading ? <div className="content-card">Loading report analytics from Firestore...</div> : (
+        <>
+          <div
+            className="content-card"
+            style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}
+          >
+            {summaryMetrics.map((item) => (
+              <div key={item.label} style={{ border: '1px solid var(--border-color)', borderRadius: 10, padding: 12 }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{item.label}</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--primary-color)' }}>{item.value}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{item.detail}</div>
+              </div>
+            ))}
+          </div>
+          {chartViews}
+        </>
+      )}
     </main>
   );
 }
